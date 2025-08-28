@@ -16,6 +16,8 @@ const inquiryRoutes = require("./routes/inquiryRoutes.js");
 const cartRoutes = require("./routes/cartRoutes.js");
 const orderRoutes = require("./routes/orderRoutes.js");
 const adminRoutes = require('./routes/adminRoutes'); 
+const blogRoutes = require("./routes/blogRoutes.js");
+
 
 
 dotenv.config();
@@ -42,6 +44,8 @@ app.use("/api/inquiries", inquiryRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use("/api/blogs", blogRoutes);
+
 
 
 app.use(notFound);
