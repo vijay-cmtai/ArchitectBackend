@@ -82,7 +82,7 @@ const professionalPlanSchema = mongoose.Schema(
     status: {
       type: String,
       enum: ["Published"],
-      default: "Pending Review",
+      default: "Published",
     },
     mainImage: {
       type: String,
