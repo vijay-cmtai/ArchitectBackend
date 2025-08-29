@@ -8,9 +8,7 @@ const generateToken = (id) => {
   });
 };
 
-// ==========================================================
-// ✨ BADLAV YAHAN HAI: Validation ko Model ke anusaar theek kiya gaya ✨
-// ==========================================================
+// Validates fields based on the user's role
 const validateRoleFields = (role, body) => {
   const {
     name,
@@ -20,6 +18,8 @@ const validateRoleFields = (role, body) => {
     city,
     materialType,
     companyName,
+    // ++ CHANGE HERE: Destructure the new experience field from the request body
+    experience,
   } = body;
 
   switch (role) {
@@ -46,17 +46,19 @@ const validateRoleFields = (role, body) => {
         status: "Pending",
       };
 
-    // 'partner' ko 'Contractor' se badla gaya aur validation theek kiya gaya
     case "Contractor":
-      if (!name || !companyName || !address || !city)
+      // ++ CHANGE HERE: Add 'experience' to the validation check
+      if (!name || !companyName || !address || !city || !experience)
         throw new Error(
-          "Full Name, Company Name, Address, and City are required"
+          "Full Name, Company Name, Address, City, and Experience are required"
         );
+      // ++ CHANGE HERE: Add 'experience' to the data being returned for creation
       return {
-        name, // Contractor ke liye 'name' bhi zaroori hai
+        name,
         companyName,
         address,
         city,
+        experience,
         isApproved: false,
         status: "Pending",
       };
@@ -71,10 +73,12 @@ const validateRoleFields = (role, body) => {
 };
 
 const getUserDisplayName = (user) => {
-  // Yeh logic abhi bhi sahi kaam karega kyunki 'name' ko prathmikta di gayi hai
   return user.name || user.businessName || user.companyName;
 };
 
+// @desc    Register a new user
+// @route   POST /api/users
+// @access  Public
 const registerUser = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
   if (!email || !password || !phone || !role) {
@@ -95,7 +99,6 @@ const registerUser = asyncHandler(async (req, res) => {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
-    // Sirf 'seller' ke liye registration ke time photo lega
     if (role === "seller" && req.file) {
       userData.photoUrl = req.file.path;
     }
@@ -111,6 +114,8 @@ const registerUser = asyncHandler(async (req, res) => {
       status: user.status,
       photoUrl: user.photoUrl,
       profession: user.profession,
+      // ++ CHANGE HERE: Return the experience field in the response
+      experience: user.experience,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -119,6 +124,9 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Create a new user via Admin panel
+// @route   POST /api/users/create
+// @access  Private/Admin
 const createUserByAdmin = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
   if (!email || !password || !phone || !role) {
@@ -149,6 +157,9 @@ const createUserByAdmin = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Auth user & get token
+// @route   POST /api/users/login
+// @access  Public
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -167,6 +178,8 @@ const loginUser = asyncHandler(async (req, res) => {
       profession: user.profession,
       businessName: user.businessName,
       companyName: user.companyName,
+      // ++ CHANGE HERE: Return the experience field on login
+      experience: user.experience,
       photoUrl: user.photoUrl,
       token: generateToken(user._id),
     });
@@ -176,9 +189,12 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Get all users
+// @route   GET /api/users
+// @access  Private/Admin
 const getAllUsers = asyncHandler(async (req, res) => {
   const { role, status, page = 1, limit = 10 } = req.query;
-  let filter = { role: { $ne: "admin" } }; // 'Admin' ko 'admin' kiya, case-insensitive ke liye
+  let filter = { role: { $ne: "admin" } };
   if (role && role !== "all") filter.role = role;
   if (status && status !== "all") filter.status = status;
   const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
@@ -200,6 +216,9 @@ const getAllUsers = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private/Admin
 const getUserById = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -214,6 +233,9 @@ const getUserById = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Update user
+// @route   PUT /api/users/:id
+// @access  Private/Admin
 const updateUser = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -243,7 +265,6 @@ const updateUser = asyncHandler(async (req, res) => {
       user.isApproved = false;
   }
 
-  // Profile photo update logic
   if (req.file) {
     user.photoUrl = req.file.path;
   }
@@ -256,10 +277,11 @@ const updateUser = asyncHandler(async (req, res) => {
     user.city = req.body.city || user.city;
     user.materialType = req.body.materialType || user.materialType;
   } else if (user.role === "Contractor") {
-    // ✨ 'partner' ko 'Contractor' se badla gaya
     user.companyName = req.body.companyName || user.companyName;
     user.address = req.body.address || user.address;
     user.city = req.body.city || user.city;
+    // ++ CHANGE HERE: Add logic to update the experience field
+    user.experience = req.body.experience || user.experience;
   }
 
   const updatedUser = await user.save();
@@ -278,9 +300,14 @@ const updateUser = asyncHandler(async (req, res) => {
     city: updatedUser.city,
     materialType: updatedUser.materialType,
     photoUrl: updatedUser.photoUrl,
+    // ++ CHANGE HERE: Return the updated experience field
+    experience: updatedUser.experience,
   });
 });
 
+// @desc    Delete user
+// @route   DELETE /api/users/:id
+// @access  Private/Admin
 const deleteUser = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -307,6 +334,9 @@ const deleteUser = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Get user statistics
+// @route   GET /api/users/stats
+// @access  Private/Admin
 const getUserStats = asyncHandler(async (req, res) => {
   const stats = await User.aggregate([
     { $match: { role: { $ne: "admin" } } },
@@ -315,7 +345,7 @@ const getUserStats = asyncHandler(async (req, res) => {
         _id: "$role",
         count: { $sum: 1 },
         approved: { $sum: { $cond: [{ $eq: ["$isApproved", true] }, 1, 0] } },
-        pending: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } }, // isApproved se status par switch kiya
+        pending: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } },
       },
     },
   ]);

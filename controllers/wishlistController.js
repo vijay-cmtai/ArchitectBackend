@@ -1,6 +1,39 @@
+// controllers/wishlistController.js
+
 const asyncHandler = require("express-async-handler");
 const Wishlist = require("../models/wishlistModel.js");
-const Product = require("../models/productModel.js"); // Make sure you have a Product model
+const Product = require("../models/productModel.js");
+const ProfessionalPlan = require("../models/professionalPlanModel.js");
+
+// Helper function to get product/plan details from either model
+const getPlanDetails = async (productId) => {
+  let plan = await Product.findById(productId);
+  if (plan) {
+    return {
+      productId: plan._id,
+      name: plan.name,
+      price: plan.price,
+      salePrice: plan.salePrice,
+      image: plan.mainImage || plan.image,
+      size: plan.plotSize,
+    };
+  }
+
+  plan = await ProfessionalPlan.findById(productId);
+  if (plan) {
+    // Normalize professional plan to match wishlist item structure
+    return {
+      productId: plan._id,
+      name: plan.planName,
+      price: plan.price,
+      salePrice: plan.salePrice, // Assuming professional plans can also be on sale
+      image: plan.mainImage,
+      size: plan.plotSize,
+    };
+  }
+
+  return null; // Return null if not found in either collection
+};
 
 // @desc    Get user's wishlist
 // @route   GET /api/wishlist
@@ -11,7 +44,7 @@ const getWishlist = asyncHandler(async (req, res) => {
   if (wishlist) {
     res.json(wishlist);
   } else {
-    // If no wishlist exists, create an empty one for the user
+    // If no wishlist exists, create and return an empty one
     wishlist = await Wishlist.create({ user: req.user._id, items: [] });
     res.status(200).json(wishlist);
   }
@@ -22,38 +55,33 @@ const getWishlist = asyncHandler(async (req, res) => {
 // @access  Private
 const addToWishlist = asyncHandler(async (req, res) => {
   const { productId } = req.body;
-  const userId = req.user._id;
-
-  const product = await Product.findById(productId);
-  if (!product) {
-    res.status(404);
-    throw new Error("Product not found");
+  if (!productId) {
+    res.status(400);
+    throw new Error("Product ID is required");
   }
 
-  let wishlist = await Wishlist.findOne({ user: userId });
+  const planDetails = await getPlanDetails(productId);
+  if (!planDetails) {
+    res.status(404);
+    throw new Error("Product or Plan not found");
+  }
+
+  let wishlist = await Wishlist.findOne({ user: req.user._id });
   if (!wishlist) {
-    wishlist = await Wishlist.create({ user: userId, items: [] });
+    wishlist = await Wishlist.create({ user: req.user._id, items: [] });
   }
 
   const itemExists = wishlist.items.some(
     (item) => item.productId.toString() === productId
   );
-
   if (itemExists) {
-    res.status(400);
-    throw new Error("Item already in wishlist");
+    // Item is already in wishlist, no need to add again. Return current wishlist.
+    return res.status(200).json(wishlist);
   }
 
-  wishlist.items.push({
-    productId: product._id,
-    name: product.name,
-    price: product.price,
-    salePrice: product.salePrice,
-    image: product.mainImage || product.image,
-    size: product.plotSize,
-  });
-
+  wishlist.items.push(planDetails);
   const updatedWishlist = await wishlist.save();
+
   res.status(201).json(updatedWishlist);
 });
 
@@ -62,9 +90,7 @@ const addToWishlist = asyncHandler(async (req, res) => {
 // @access  Private
 const removeFromWishlist = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const userId = req.user._id;
-
-  const wishlist = await Wishlist.findOne({ user: userId });
+  const wishlist = await Wishlist.findOne({ user: req.user._id });
 
   if (wishlist) {
     wishlist.items = wishlist.items.filter(
@@ -82,34 +108,33 @@ const removeFromWishlist = asyncHandler(async (req, res) => {
 // @route   POST /api/wishlist/merge
 // @access  Private
 const mergeWishlist = asyncHandler(async (req, res) => {
-  const { localWishlistItems } = req.body; // Expecting an array of product objects
-  const userId = req.user._id;
-
+  const { localWishlistItems } = req.body;
   if (!Array.isArray(localWishlistItems)) {
     res.status(400);
     throw new Error("Invalid local wishlist data");
   }
 
-  let userWishlist = await Wishlist.findOne({ user: userId });
+  let userWishlist = await Wishlist.findOne({ user: req.user._id });
   if (!userWishlist) {
-    userWishlist = await Wishlist.create({ user: userId, items: [] });
+    userWishlist = await Wishlist.create({ user: req.user._id, items: [] });
   }
 
-  localWishlistItems.forEach((localItem) => {
+  for (const localItem of localWishlistItems) {
+    // Note: localItem should have `id` which is the productId
+    const productId = localItem.id || localItem.productId;
+    if (!productId) continue;
+
     const itemExists = userWishlist.items.some(
-      (dbItem) => dbItem.productId.toString() === localItem.id
+      (dbItem) => dbItem.productId.toString() === productId
     );
+
     if (!itemExists) {
-      userWishlist.items.push({
-        productId: localItem.id,
-        name: localItem.name,
-        price: localItem.price,
-        salePrice: localItem.salePrice,
-        image: localItem.image,
-        size: localItem.size,
-      });
+      const planDetails = await getPlanDetails(productId);
+      if (planDetails) {
+        userWishlist.items.push(planDetails);
+      }
     }
-  });
+  }
 
   const mergedWishlist = await userWishlist.save();
   res.status(200).json(mergedWishlist);

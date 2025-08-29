@@ -15,8 +15,9 @@ const corporateInquiryRoutes = require("./routes/corporateInquiryRoutes");
 const inquiryRoutes = require("./routes/inquiryRoutes.js");
 const cartRoutes = require("./routes/cartRoutes.js");
 const orderRoutes = require("./routes/orderRoutes.js");
-const adminRoutes = require('./routes/adminRoutes'); 
-
+const adminRoutes = require("./routes/adminRoutes");
+const wishlistRoutes = require("./routes/wishlistRoutes.js");
+const blogRoutes = require("./routes/blogRoutes.js");
 
 dotenv.config();
 connectDB();
@@ -41,8 +42,9 @@ app.use("/api/corporate-inquiries", corporateInquiryRoutes);
 app.use("/api/inquiries", inquiryRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
-app.use('/api/admin', adminRoutes);
-
+app.use("/api/admin", adminRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/blogs", blogRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

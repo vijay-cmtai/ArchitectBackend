@@ -10,6 +10,7 @@ const { protect } = require("../middleware/authMiddleware.js");
 const router = express.Router();
 
 // All routes are protected and require a logged-in user
+console.log("wishlist route")
 router.route("/").get(protect, getWishlist);
 router.route("/add").post(protect, addToWishlist);
 router.route("/merge").post(protect, mergeWishlist);

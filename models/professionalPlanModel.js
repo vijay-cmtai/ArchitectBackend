@@ -7,7 +7,7 @@ const professionalPlanSchema = mongoose.Schema(
     professional: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
-      ref: "User", 
+      ref: "User",
     },
     planName: {
       type: String,
@@ -82,7 +82,7 @@ const professionalPlanSchema = mongoose.Schema(
     status: {
       type: String,
       enum: ["Published"],
-      default: "Pending Review",
+      default: "Published",
     },
     mainImage: {
       type: String,
@@ -93,10 +93,10 @@ const professionalPlanSchema = mongoose.Schema(
       type: String,
       required: [true, "Plan file is required"],
     },
-    
+
     youtubeLink: {
       type: String,
-      trim: true, 
+      trim: true,
     },
   },
   {

@@ -13,7 +13,7 @@ const userSchema = mongoose.Schema(
       required: true,
       enum: ["user", "professional", "seller", "Contractor", "admin"],
     },
-    name: { type: String }, // User, Professional, Admin, Contractor ke liye
+    name: { type: String }, // For User, Professional, Admin, Contractor
 
     // Approval Status
     isApproved: {
@@ -29,17 +29,19 @@ const userSchema = mongoose.Schema(
     // Profile Image
     photoUrl: { type: String },
 
-    // Professional ke liye
+    // For Professional
     profession: { type: String },
 
-    // Seller ke liye
+    // For Seller
     businessName: { type: String },
     materialType: { type: String },
 
-    // Contractor ke liye
+    // For Contractor
     companyName: { type: String },
+    // ++ CHANGE HERE: Added experience field for contractors
+    experience: { type: String },
 
-    // Seller aur Contractor dono ke liye common
+    // Common for Seller and Contractor
     address: { type: String },
     city: { type: String },
   },

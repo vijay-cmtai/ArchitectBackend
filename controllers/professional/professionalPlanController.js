@@ -58,7 +58,7 @@ const createPlan = asyncHandler(async (req, res) => {
   const plan = new ProfessionalPlan({
     ...req.body,
     professional: req.user._id,
-    status: "Pending Review",
+    status: "Published",
     mainImage: req.files.mainImage[0].path,
     planFile: req.files.planFile[0].path,
     galleryImages: req.files.galleryImages

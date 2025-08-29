@@ -1,11 +1,24 @@
+// models/customizationRequestModel.js
+
 const mongoose = require("mongoose");
 
 const customizationRequestSchema = mongoose.Schema(
   {
+    // ++ CHANGE HERE: Added countryName field ++
+    countryName: {
+      type: String,
+      required: [false, "Country name is required."],
+      trim: true,
+    },
     requestType: {
       type: String,
       required: true,
-      enum: ["Floor Plan Customization", "3D Elevation", "Interior Design"],
+      enum: [
+        "Floor Plan Customization",
+        "3D Elevation",
+        "Interior Design",
+        "3D Video Walkthrough",
+      ],
     },
     name: {
       type: String,
@@ -19,7 +32,7 @@ const customizationRequestSchema = mongoose.Schema(
       type: String,
       required: true,
     },
-    // Form se aane wale baaki saare fields
+    // Form fields for different request types
     width: { type: String },
     length: { type: String },
     roomWidth: { type: String },
@@ -31,20 +44,19 @@ const customizationRequestSchema = mongoose.Schema(
     description: { type: String },
     referenceFileUrl: { type: String },
 
-    // Admin dwara update kiye jaane wale fields
+    // Admin fields
     status: {
       type: String,
-      // ✨ YAHAN BADLAAV HAI: Enum values ko frontend se match kiya gaya hai ✨
       enum: ["Pending", "Contacted", "In Progress", "Completed", "Cancelled"],
-      default: "Pending", // Default status ab 'Pending' hai
+      default: "Pending",
     },
     adminNotes: {
       type: String,
-      default: "", // Default khaali string rakhein
+      default: "",
     },
   },
   {
-    timestamps: true,
+    timestamps: true, // Automatically adds createdAt and updatedAt fields
   }
 );
 
