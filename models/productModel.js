@@ -42,7 +42,7 @@ const productSchema = mongoose.Schema(
       required: true,
       enum: [
         "Floor Plans",
-        "3D Elevations",
+        "Floor Plans + 3D Elevations",
         "Interior Designs",
         "Construction Products",
       ],

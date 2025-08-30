@@ -12,13 +12,12 @@ const generateToken = (id) => {
 const validateRoleFields = (role, body) => {
   const {
     name,
-    profession,
+    profession, // This is now used for both Professionals and Contractors
     businessName,
     address,
     city,
     materialType,
     companyName,
-    // ++ CHANGE HERE: Destructure the new experience field from the request body
     experience,
   } = body;
 
@@ -47,18 +46,26 @@ const validateRoleFields = (role, body) => {
       };
 
     case "Contractor":
-      // ++ CHANGE HERE: Add 'experience' to the validation check
-      if (!name || !companyName || !address || !city || !experience)
+      // ++ CHANGE HERE: Added 'profession' to the validation check for Contractors
+      if (
+        !name ||
+        !companyName ||
+        !address ||
+        !city ||
+        !experience ||
+        !profession
+      )
         throw new Error(
-          "Full Name, Company Name, Address, City, and Experience are required"
+          "Full Name, Company Name, Address, City, Experience, and Profession are required"
         );
-      // ++ CHANGE HERE: Add 'experience' to the data being returned for creation
+      // ++ CHANGE HERE: Added 'profession' to the data being returned for creation
       return {
         name,
         companyName,
         address,
         city,
         experience,
+        profession, // Added profession for contractor
         isApproved: false,
         status: "Pending",
       };
@@ -77,7 +84,7 @@ const getUserDisplayName = (user) => {
 };
 
 // @desc    Register a new user
-// @route   POST /api/users
+// @route   POST /api/users/register
 // @access  Public
 const registerUser = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
@@ -114,7 +121,6 @@ const registerUser = asyncHandler(async (req, res) => {
       status: user.status,
       photoUrl: user.photoUrl,
       profession: user.profession,
-      // ++ CHANGE HERE: Return the experience field in the response
       experience: user.experience,
       token: generateToken(user._id),
     });
@@ -125,7 +131,7 @@ const registerUser = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create a new user via Admin panel
-// @route   POST /api/users/create
+// @route   POST /api/users/admin/create
 // @access  Private/Admin
 const createUserByAdmin = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
@@ -178,7 +184,6 @@ const loginUser = asyncHandler(async (req, res) => {
       profession: user.profession,
       businessName: user.businessName,
       companyName: user.companyName,
-      // ++ CHANGE HERE: Return the experience field on login
       experience: user.experience,
       photoUrl: user.photoUrl,
       token: generateToken(user._id),
@@ -280,8 +285,9 @@ const updateUser = asyncHandler(async (req, res) => {
     user.companyName = req.body.companyName || user.companyName;
     user.address = req.body.address || user.address;
     user.city = req.body.city || user.city;
-    // ++ CHANGE HERE: Add logic to update the experience field
     user.experience = req.body.experience || user.experience;
+    // ++ CHANGE HERE: Add logic to update the profession field for contractors
+    user.profession = req.body.profession || user.profession;
   }
 
   const updatedUser = await user.save();
@@ -300,7 +306,6 @@ const updateUser = asyncHandler(async (req, res) => {
     city: updatedUser.city,
     materialType: updatedUser.materialType,
     photoUrl: updatedUser.photoUrl,
-    // ++ CHANGE HERE: Return the updated experience field
     experience: updatedUser.experience,
   });
 });
