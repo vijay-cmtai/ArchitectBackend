@@ -13,13 +13,10 @@ const userSchema = mongoose.Schema(
       required: true,
       enum: ["user", "professional", "seller", "Contractor", "admin"],
     },
-    name: { type: String }, // For User, Professional, Admin, Contractor
+    name: { type: String },
 
     // Approval Status
-    isApproved: {
-      type: Boolean,
-      default: false,
-    },
+    isApproved: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["Pending", "Approved", "Rejected"],
@@ -31,6 +28,9 @@ const userSchema = mongoose.Schema(
 
     // For Professional
     profession: { type: String },
+    // ++ CHANGE HERE: Added fields for professional's documents
+    businessCertificationUrl: { type: String },
+    shopImageUrl: { type: String },
 
     // For Seller
     businessName: { type: String },
@@ -38,7 +38,6 @@ const userSchema = mongoose.Schema(
 
     // For Contractor
     companyName: { type: String },
-    // ++ CHANGE HERE: Added experience field for contractors
     experience: { type: String },
 
     // Common for Seller and Contractor
@@ -50,7 +49,6 @@ const userSchema = mongoose.Schema(
   }
 );
 
-// Password hashing and matching logic
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

@@ -1,8 +1,9 @@
-// controllers/professionalPlanController.js
-
 const asyncHandler = require("express-async-handler");
 const ProfessionalPlan = require("../../models/professionalPlanModel.js");
 
+// @desc    Get all approved plans for public view
+// @route   GET /api/professional-plans
+// @access  Public
 const getAllApprovedPlans = asyncHandler(async (req, res) => {
   const plans = await ProfessionalPlan.find({
     status: { $in: ["Approved", "Published"] },
@@ -11,11 +12,17 @@ const getAllApprovedPlans = asyncHandler(async (req, res) => {
   res.json(plans);
 });
 
+// @desc    Get plans created by the logged-in professional
+// @route   GET /api/professional-plans/my-plans
+// @access  Private/Professional
 const getMyPlans = asyncHandler(async (req, res) => {
   const plans = await ProfessionalPlan.find({ professional: req.user._id });
   res.json(plans);
 });
 
+// @desc    Get a single plan by its ID
+// @route   GET /api/professional-plans/:id
+// @access  Public
 const getPlanById = asyncHandler(async (req, res) => {
   const plan = await ProfessionalPlan.findById(req.params.id).populate(
     "professional",
@@ -29,6 +36,9 @@ const getPlanById = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Create a new plan
+// @route   POST /api/professional-plans
+// @access  Private/Professional
 const createPlan = asyncHandler(async (req, res) => {
   if (req.user.role !== "professional" || !req.user.isApproved) {
     res.status(403);
@@ -70,6 +80,9 @@ const createPlan = asyncHandler(async (req, res) => {
   res.status(201).json(createdPlan);
 });
 
+// @desc    Update a plan owned by the professional
+// @route   PUT /api/professional-plans/:id
+// @access  Private/Professional
 const updatePlan = asyncHandler(async (req, res) => {
   const plan = await ProfessionalPlan.findById(req.params.id);
   if (!plan) {
@@ -96,6 +109,9 @@ const updatePlan = asyncHandler(async (req, res) => {
   res.json(updatedPlan);
 });
 
+// @desc    Delete a plan owned by the professional
+// @route   DELETE /api/professional-plans/:id
+// @access  Private/Professional
 const deletePlan = asyncHandler(async (req, res) => {
   const plan = await ProfessionalPlan.findById(req.params.id);
   if (!plan) {
@@ -110,6 +126,49 @@ const deletePlan = asyncHandler(async (req, res) => {
   res.json({ message: "Plan removed successfully" });
 });
 
+// @desc    Create a new review for a professional plan
+// @route   POST /api/professional-plans/:id/reviews
+// @access  Private (for logged-in users)
+const createPlanReview = asyncHandler(async (req, res) => {
+  const { rating, comment } = req.body;
+
+  if (!rating || !comment) {
+    res.status(400);
+    throw new Error("Rating and comment are required");
+  }
+
+  const plan = await ProfessionalPlan.findById(req.params.id);
+
+  if (plan) {
+    // Check if the user has already reviewed this plan
+    const alreadyReviewed = plan.reviews.find(
+      (r) => r.user.toString() === req.user._id.toString()
+    );
+
+    if (alreadyReviewed) {
+      res.status(400);
+      throw new Error("Plan already reviewed by this user");
+    }
+
+    // Create the new review object
+    const review = {
+      name: req.user.name,
+      rating: Number(rating),
+      comment,
+      user: req.user._id,
+    };
+
+    // Add the new review to the plan's reviews array
+    plan.reviews.push(review);
+
+    await plan.save();
+    res.status(201).json({ message: "Review added successfully" });
+  } else {
+    res.status(404);
+    throw new Error("Plan not found");
+  }
+});
+
 module.exports = {
   getAllApprovedPlans,
   getMyPlans,
@@ -117,4 +176,5 @@ module.exports = {
   createPlan,
   updatePlan,
   deletePlan,
+  createPlanReview,
 };

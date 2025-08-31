@@ -1,4 +1,23 @@
+// models/productModel.js
+
 const mongoose = require("mongoose");
+
+// Schema for an individual review
+const reviewSchema = mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    rating: { type: Number, required: true },
+    comment: { type: String, required: true },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: "User",
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
 
 const productSchema = mongoose.Schema(
   {
@@ -16,7 +35,6 @@ const productSchema = mongoose.Schema(
       type: String,
       required: [true, "Product description is required"],
     },
-    // ... baaki saare fields (plotSize, plotArea, etc.) waise hi rahenge
     plotSize: { type: String, required: true },
     plotArea: { type: Number, required: true },
     rooms: { type: Number, required: true, default: 0 },
@@ -62,17 +80,30 @@ const productSchema = mongoose.Schema(
     planFile: { type: String, required: true },
     rating: { type: Number, default: 0 },
     numReviews: { type: Number, default: 0 },
-
-    // ✨ YEH NAYA FIELD ADD KIYA GAYA HAI ✨
     youtubeLink: {
       type: String,
-      trim: true, // Extra spaces ko hata dega
+      trim: true,
     },
+    // ++ CHANGE HERE: The array of reviews is now part of the product
+    reviews: [reviewSchema],
   },
   {
     timestamps: true,
   }
 );
+
+// ++ CHANGE HERE: Middleware to automatically update the average rating after saving
+productSchema.pre("save", function (next) {
+  if (this.isModified("reviews")) {
+    const totalRating = this.reviews.reduce(
+      (acc, item) => item.rating + acc,
+      0
+    );
+    this.numReviews = this.reviews.length;
+    this.rating = this.numReviews > 0 ? totalRating / this.numReviews : 0;
+  }
+  next();
+});
 
 const Product = mongoose.model("Product", productSchema);
 

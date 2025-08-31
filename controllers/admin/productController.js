@@ -1,13 +1,19 @@
+// controllers/admin/productController.js
+
 const asyncHandler = require("express-async-handler");
 const Product = require("../../models/productModel.js");
 
 // @desc    Fetch all products
+// @route   GET /api/products
+// @access  Public
 const getProducts = asyncHandler(async (req, res) => {
   const products = await Product.find({}).populate("user", "name profession");
   res.json(products);
 });
 
-// @desc    Fetch a single product by ID
+// @desc    Fetch a single product by ID, including its reviews
+// @route   GET /api/products/:id
+// @access  Public
 const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (product) {
@@ -18,6 +24,9 @@ const getProductById = asyncHandler(async (req, res) => {
   }
 });
 
+// @desc    Create a new product
+// @route   POST /api/products
+// @access  Private/ProfessionalOrAdmin
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -36,7 +45,7 @@ const createProduct = asyncHandler(async (req, res) => {
     direction,
     country,
     planType,
-    youtubeLink, // ✨ Naya field get karein
+    youtubeLink,
   } = req.body;
 
   if (
@@ -80,7 +89,7 @@ const createProduct = asyncHandler(async (req, res) => {
     galleryImages: req.files.galleryImages
       ? req.files.galleryImages.map((file) => file.path)
       : [],
-    youtubeLink, // ✨ Naye field ko add karein
+    youtubeLink,
   });
 
   const createdProduct = await product.save();
@@ -88,28 +97,10 @@ const createProduct = asyncHandler(async (req, res) => {
 });
 
 // @desc    Update an existing product
+// @route   PUT /api/products/:id
+// @access  Private/ProfessionalOrAdmin
 const updateProduct = asyncHandler(async (req, res) => {
-  const {
-    name,
-    description,
-    plotSize,
-    plotArea,
-    rooms,
-    bathrooms,
-    kitchen,
-    floors,
-    price,
-    salePrice,
-    isSale,
-    category,
-    propertyType,
-    status,
-    direction,
-    country,
-    planType,
-    youtubeLink, // ✨ Naya field get karein
-  } = req.body;
-
+  const { youtubeLink } = req.body;
   const product = await Product.findById(req.params.id);
 
   if (product) {
@@ -121,11 +112,9 @@ const updateProduct = asyncHandler(async (req, res) => {
       throw new Error("Not authorized to update this product");
     }
 
-    // Update all fields
     Object.assign(product, req.body);
-    product.youtubeLink = youtubeLink || product.youtubeLink; // ✨ Naye field ko update karein
+    product.youtubeLink = youtubeLink || product.youtubeLink;
 
-    // Update files if provided
     if (req.files) {
       if (req.files.mainImage) product.mainImage = req.files.mainImage[0].path;
       if (req.files.planFile) product.planFile = req.files.planFile[0].path;
@@ -144,6 +133,8 @@ const updateProduct = asyncHandler(async (req, res) => {
 });
 
 // @desc    Delete a product
+// @route   DELETE /api/products/:id
+// @access  Private/ProfessionalOrAdmin
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (product) {
@@ -162,10 +153,60 @@ const deleteProduct = asyncHandler(async (req, res) => {
   }
 });
 
+// ==========================================================
+// ✨ NEW FUNCTION TO ADD REVIEWS ✨
+// ==========================================================
+// @desc    Create a new review for a product
+// @route   POST /api/products/:id/reviews
+// @access  Private (for logged-in users)
+const createProductReview = asyncHandler(async (req, res) => {
+  const { rating, comment } = req.body;
+
+  if (!rating || !comment) {
+    res.status(400);
+    throw new Error("Rating and comment are required");
+  }
+
+  const product = await Product.findById(req.params.id);
+
+  if (product) {
+    // Check if the user has already reviewed this product
+    const alreadyReviewed = product.reviews.find(
+      (r) => r.user.toString() === req.user._id.toString()
+    );
+
+    if (alreadyReviewed) {
+      res.status(400);
+      throw new Error("Product already reviewed by this user");
+    }
+
+    // Create the new review object
+    const review = {
+      name: req.user.name,
+      rating: Number(rating),
+      comment,
+      user: req.user._id,
+    };
+
+    // Add the new review to the product's reviews array
+    product.reviews.push(review);
+
+    // The middleware in the model will automatically update numReviews and rating
+
+    await product.save();
+    res.status(201).json({ message: "Review added successfully" });
+  } else {
+    res.status(404);
+    throw new Error("Product not found");
+  }
+});
+
 module.exports = {
   getProducts,
   getProductById,
   createProduct,
   updateProduct,
   deleteProduct,
+  // ++ CHANGE HERE: Export the new function
+  createProductReview,
 };

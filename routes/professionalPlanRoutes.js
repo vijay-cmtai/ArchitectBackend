@@ -1,12 +1,15 @@
+// routes/professionalPlanRoutes.js
+
 const express = require("express");
 const router = express.Router();
 const {
-  getAllApprovedPlans, // Naya function import karein
+  getAllApprovedPlans,
   getMyPlans,
   getPlanById,
   createPlan,
   updatePlan,
   deletePlan,
+  createPlanReview,
 } = require("../controllers/professional/professionalPlanController.js");
 const {
   protect,
@@ -20,17 +23,18 @@ const handleFileUploads = upload.fields([
   { name: "planFile", maxCount: 1 },
 ]);
 
-// ✨ NAYE ROUTES KA STRUCTURE ✨
 router
   .route("/")
   .get(getAllApprovedPlans)
-  .post(protect, professionalProtect, handleFileUploads, createPlan); 
+  .post(protect, professionalProtect, handleFileUploads, createPlan);
+
 router.route("/my-plans").get(protect, professionalProtect, getMyPlans);
 
 router
   .route("/:id")
-  .get(getPlanById) 
+  .get(getPlanById)
   .put(protect, professionalProtect, handleFileUploads, updatePlan)
   .delete(protect, professionalProtect, deletePlan);
+router.route("/:id/reviews").post(protect, createPlanReview);
 
 module.exports = router;

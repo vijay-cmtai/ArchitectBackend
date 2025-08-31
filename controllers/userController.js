@@ -12,7 +12,7 @@ const generateToken = (id) => {
 const validateRoleFields = (role, body) => {
   const {
     name,
-    profession, // This is now used for both Professionals and Contractors
+    profession,
     businessName,
     address,
     city,
@@ -46,7 +46,6 @@ const validateRoleFields = (role, body) => {
       };
 
     case "Contractor":
-      // ++ CHANGE HERE: Added 'profession' to the validation check for Contractors
       if (
         !name ||
         !companyName ||
@@ -58,14 +57,13 @@ const validateRoleFields = (role, body) => {
         throw new Error(
           "Full Name, Company Name, Address, City, Experience, and Profession are required"
         );
-      // ++ CHANGE HERE: Added 'profession' to the data being returned for creation
       return {
         name,
         companyName,
         address,
         city,
         experience,
-        profession, // Added profession for contractor
+        profession,
         isApproved: false,
         status: "Pending",
       };
@@ -106,8 +104,18 @@ const registerUser = asyncHandler(async (req, res) => {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
-    if (role === "seller" && req.file) {
-      userData.photoUrl = req.file.path;
+    // Handle all potential file uploads from the middleware
+    if (req.files) {
+      if (req.files.photo) {
+        userData.photoUrl = req.files.photo[0].path;
+      }
+      if (req.files.businessCertification) {
+        userData.businessCertificationUrl =
+          req.files.businessCertification[0].path;
+      }
+      if (req.files.shopImage) {
+        userData.shopImageUrl = req.files.shopImage[0].path;
+      }
     }
 
     const user = await User.create(userData);
@@ -120,6 +128,8 @@ const registerUser = asyncHandler(async (req, res) => {
       isApproved: user.isApproved,
       status: user.status,
       photoUrl: user.photoUrl,
+      businessCertificationUrl: user.businessCertificationUrl,
+      shopImageUrl: user.shopImageUrl,
       profession: user.profession,
       experience: user.experience,
       token: generateToken(user._id),
@@ -270,8 +280,12 @@ const updateUser = asyncHandler(async (req, res) => {
       user.isApproved = false;
   }
 
-  if (req.file) {
-    user.photoUrl = req.file.path;
+  // Handle file updates during user profile edits
+  if (req.files) {
+    if (req.files.photo) user.photoUrl = req.files.photo[0].path;
+    if (req.files.businessCertification)
+      user.businessCertificationUrl = req.files.businessCertification[0].path;
+    if (req.files.shopImage) user.shopImageUrl = req.files.shopImage[0].path;
   }
 
   if (user.role === "professional") {
@@ -286,7 +300,6 @@ const updateUser = asyncHandler(async (req, res) => {
     user.address = req.body.address || user.address;
     user.city = req.body.city || user.city;
     user.experience = req.body.experience || user.experience;
-    // ++ CHANGE HERE: Add logic to update the profession field for contractors
     user.profession = req.body.profession || user.profession;
   }
 
@@ -307,6 +320,8 @@ const updateUser = asyncHandler(async (req, res) => {
     materialType: updatedUser.materialType,
     photoUrl: updatedUser.photoUrl,
     experience: updatedUser.experience,
+    businessCertificationUrl: updatedUser.businessCertificationUrl,
+    shopImageUrl: updatedUser.shopImageUrl,
   });
 });
 
