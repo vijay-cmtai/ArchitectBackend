@@ -46,7 +46,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/blogs", blogRoutes);
-app.use("api/gallery", galleryRoutes);
+app.use("/api/gallery", galleryRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
