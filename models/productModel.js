@@ -2,7 +2,6 @@
 
 const mongoose = require("mongoose");
 
-// Schema for an individual review
 const reviewSchema = mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -21,11 +20,7 @@ const reviewSchema = mongoose.Schema(
 
 const productSchema = mongoose.Schema(
   {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: true,
-      ref: "User",
-    },
+    user: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "User" },
     name: {
       type: String,
       required: [true, "Product name is required"],
@@ -34,6 +29,11 @@ const productSchema = mongoose.Schema(
     description: {
       type: String,
       required: [true, "Product description is required"],
+    },
+    productNo: {
+      type: String,
+      required: [true, "Product Number is required"],
+      unique: true,
     },
     plotSize: { type: String, required: true },
     plotArea: { type: Number, required: true },
@@ -54,13 +54,17 @@ const productSchema = mongoose.Schema(
         "South-West",
       ],
     },
-    country: { type: String, required: true },
+    city: {
+      type: [String],
+      required: true,
+    },
+    country: { type: [String], required: true },
     planType: {
       type: String,
       required: true,
       enum: [
         "Floor Plans",
-        "Floor Plans + 3D Elevations",
+        "Floor Plan + 3D Elevations",
         "Interior Designs",
         "Construction Products",
       ],
@@ -77,22 +81,26 @@ const productSchema = mongoose.Schema(
     },
     mainImage: { type: String, required: true },
     galleryImages: [{ type: String }],
-    planFile: { type: String, required: true },
+    planFile: { type: [String], required: true },
+    headerImage: { type: String },
     rating: { type: Number, default: 0 },
     numReviews: { type: Number, default: 0 },
-    youtubeLink: {
-      type: String,
-      trim: true,
-    },
-    // ++ CHANGE HERE: The array of reviews is now part of the product
+    youtubeLink: { type: String, trim: true },
     reviews: [reviewSchema],
+
+    // ++ CAMPO AÑADIDO ++
+    // Detalles de contacto, principalmente para "Construction Products"
+    contactDetails: {
+      name: { type: String, trim: true },
+      email: { type: String, trim: true },
+      phone: { type: String, trim: true },
+    },
   },
   {
     timestamps: true,
   }
 );
 
-// ++ CHANGE HERE: Middleware to automatically update the average rating after saving
 productSchema.pre("save", function (next) {
   if (this.isModified("reviews")) {
     const totalRating = this.reviews.reduce(
@@ -106,5 +114,4 @@ productSchema.pre("save", function (next) {
 });
 
 const Product = mongoose.model("Product", productSchema);
-
 module.exports = Product;

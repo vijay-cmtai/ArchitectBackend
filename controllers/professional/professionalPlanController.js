@@ -1,3 +1,5 @@
+// controllers/professionalPlanController.js
+
 const asyncHandler = require("express-async-handler");
 const ProfessionalPlan = require("../../models/professionalPlanModel.js");
 
@@ -7,7 +9,7 @@ const ProfessionalPlan = require("../../models/professionalPlanModel.js");
 const getAllApprovedPlans = asyncHandler(async (req, res) => {
   const plans = await ProfessionalPlan.find({
     status: { $in: ["Approved", "Published"] },
-  }).populate("professional", "name profession");
+  }).populate("user", "name profession"); // Cambiado de 'professional' a 'user'
 
   res.json(plans);
 });
@@ -16,7 +18,7 @@ const getAllApprovedPlans = asyncHandler(async (req, res) => {
 // @route   GET /api/professional-plans/my-plans
 // @access  Private/Professional
 const getMyPlans = asyncHandler(async (req, res) => {
-  const plans = await ProfessionalPlan.find({ professional: req.user._id });
+  const plans = await ProfessionalPlan.find({ user: req.user._id }); // Cambiado de 'professional' a 'user'
   res.json(plans);
 });
 
@@ -25,7 +27,7 @@ const getMyPlans = asyncHandler(async (req, res) => {
 // @access  Public
 const getPlanById = asyncHandler(async (req, res) => {
   const plan = await ProfessionalPlan.findById(req.params.id).populate(
-    "professional",
+    "user", // Cambiado de 'professional' a 'user'
     "name profession"
   );
   if (plan) {
@@ -40,42 +42,77 @@ const getPlanById = asyncHandler(async (req, res) => {
 // @route   POST /api/professional-plans
 // @access  Private/Professional
 const createPlan = asyncHandler(async (req, res) => {
+  // ++ LÓGICA REESCRITA PARA COINCIDIR CON createProduct ++
   if (req.user.role !== "professional" || !req.user.isApproved) {
     res.status(403);
     throw new Error(
       "Access Denied. Only approved professionals can create plans."
     );
   }
-  const { planName, price, category, plotSize, plotArea, country, planType } =
-    req.body;
+
+  const {
+    name,
+    price,
+    category,
+    plotSize,
+    plotArea,
+    country,
+    planType,
+    city,
+    productNo,
+  } = req.body;
+
   if (
-    !planName ||
+    !name ||
     !price ||
     !category ||
     !plotSize ||
     !plotArea ||
     !country ||
-    !planType
+    !planType ||
+    !city ||
+    !productNo
   ) {
     res.status(400);
-    throw new Error("Please fill all required fields");
+    throw new Error(
+      "Please fill all required fields, including city and product number"
+    );
   }
+
+  const planExists = await ProfessionalPlan.findOne({ productNo });
+  if (planExists) {
+    res.status(400);
+    throw new Error("A plan with this Product Number already exists.");
+  }
+
   if (!req.files || !req.files.mainImage || !req.files.planFile) {
     res.status(400);
-    throw new Error("A main image and a plan file are required");
+    throw new Error("Main image and at least one plan file are required");
   }
 
-  const plan = new ProfessionalPlan({
-    ...req.body,
-    professional: req.user._id,
-    status: "Published",
-    mainImage: req.files.mainImage[0].path,
-    planFile: req.files.planFile[0].path,
-    galleryImages: req.files.galleryImages
-      ? req.files.galleryImages.map((f) => f.path)
-      : [],
-  });
+  const countryArray = country.split(",").map((c) => c.trim());
+  const cityArray = city.split(",").map((c) => c.trim());
+  const planFilesArray = req.files.planFile.map((file) => file.path);
 
+  const planData = {
+    ...req.body,
+    user: req.user._id, // Usando 'user' en lugar de 'professional'
+    name: name, // Usando 'name' en lugar de 'planName'
+    country: countryArray,
+    city: cityArray,
+    isSale: req.body.isSale === "true",
+    mainImage: req.files.mainImage[0].path,
+    planFile: planFilesArray, // Ahora es un array
+    galleryImages: req.files.galleryImages
+      ? req.files.galleryImages.map((file) => file.path)
+      : [],
+    headerImage: req.files.headerImage
+      ? req.files.headerImage[0].path
+      : undefined,
+    // El status se tomará del default del modelo ("Pending Review") o el que venga en el body
+  };
+
+  const plan = new ProfessionalPlan(planData);
   const createdPlan = await plan.save();
   res.status(201).json(createdPlan);
 });
@@ -84,26 +121,51 @@ const createPlan = asyncHandler(async (req, res) => {
 // @route   PUT /api/professional-plans/:id
 // @access  Private/Professional
 const updatePlan = asyncHandler(async (req, res) => {
+  // ++ LÓGICA REESCRITA PARA COINCIDIR CON updateProduct ++
+  const { country, city, productNo } = req.body;
   const plan = await ProfessionalPlan.findById(req.params.id);
+
   if (!plan) {
     res.status(404);
     throw new Error("Plan not found");
   }
-  if (plan.professional.toString() !== req.user._id.toString()) {
+  if (plan.user.toString() !== req.user._id.toString()) {
+    // Usando 'user'
     res.status(403);
     throw new Error("Not authorized to update this plan");
   }
 
+  if (productNo && plan.productNo !== productNo) {
+    const planExists = await ProfessionalPlan.findOne({ productNo });
+    if (planExists) {
+      res
+        .status(400)
+        .throw(
+          new Error("Another plan with this Product Number already exists.")
+        );
+    }
+  }
+
   Object.assign(plan, req.body);
+
+  if (req.body.name) plan.name = req.body.name; // Asegurar que 'name' se actualiza
+  if (country) {
+    plan.country = country.split(",").map((c) => c.trim());
+  }
+  if (city) {
+    plan.city = city.split(",").map((c) => c.trim());
+  }
 
   if (req.files) {
     if (req.files.mainImage) plan.mainImage = req.files.mainImage[0].path;
-    if (req.files.planFile) plan.planFile = req.files.planFile[0].path;
+    if (req.files.headerImage) plan.headerImage = req.files.headerImage[0].path;
     if (req.files.galleryImages)
-      plan.galleryImages = req.files.galleryImages.map((f) => f.path);
+      plan.galleryImages = req.files.galleryImages.map((file) => file.path);
+    if (req.files.planFile && req.files.planFile.length > 0) {
+      const newPlanFiles = req.files.planFile.map((file) => file.path);
+      plan.planFile = [...plan.planFile, ...newPlanFiles]; // Añade nuevos archivos en lugar de reemplazar
+    }
   }
-
-  plan.status = "Published";
 
   const updatedPlan = await plan.save();
   res.json(updatedPlan);
@@ -118,7 +180,8 @@ const deletePlan = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Plan not found");
   }
-  if (plan.professional.toString() !== req.user._id.toString()) {
+  if (plan.user.toString() !== req.user._id.toString()) {
+    // Usando 'user'
     res.status(403);
     throw new Error("Not authorized to delete this plan");
   }
@@ -128,8 +191,9 @@ const deletePlan = asyncHandler(async (req, res) => {
 
 // @desc    Create a new review for a professional plan
 // @route   POST /api/professional-plans/:id/reviews
-// @access  Private (for logged-in users)
+// @access  Private
 const createPlanReview = asyncHandler(async (req, res) => {
+  // Esta función ya es consistente con la de products
   const { rating, comment } = req.body;
 
   if (!rating || !comment) {
@@ -140,7 +204,6 @@ const createPlanReview = asyncHandler(async (req, res) => {
   const plan = await ProfessionalPlan.findById(req.params.id);
 
   if (plan) {
-    // Check if the user has already reviewed this plan
     const alreadyReviewed = plan.reviews.find(
       (r) => r.user.toString() === req.user._id.toString()
     );
@@ -150,7 +213,6 @@ const createPlanReview = asyncHandler(async (req, res) => {
       throw new Error("Plan already reviewed by this user");
     }
 
-    // Create the new review object
     const review = {
       name: req.user.name,
       rating: Number(rating),
@@ -158,9 +220,7 @@ const createPlanReview = asyncHandler(async (req, res) => {
       user: req.user._id,
     };
 
-    // Add the new review to the plan's reviews array
     plan.reviews.push(review);
-
     await plan.save();
     res.status(201).json({ message: "Review added successfully" });
   } else {

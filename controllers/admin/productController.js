@@ -11,7 +11,7 @@ const getProducts = asyncHandler(async (req, res) => {
   res.json(products);
 });
 
-// @desc    Fetch a single product by ID, including its reviews
+// @desc    Fetch a single product by ID
 // @route   GET /api/products/:id
 // @access  Public
 const getProductById = asyncHandler(async (req, res) => {
@@ -30,22 +30,19 @@ const getProductById = asyncHandler(async (req, res) => {
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
-    description,
+    price,
+    category,
     plotSize,
     plotArea,
-    rooms,
-    bathrooms,
-    kitchen,
-    floors,
-    price,
-    salePrice,
-    isSale,
-    category,
-    propertyType,
-    direction,
     country,
     planType,
-    youtubeLink,
+    isSale,
+    city,
+    productNo,
+    // ++ CAMBIO AÑADIDO: Extraer campos de contacto
+    contactName,
+    contactEmail,
+    contactPhone,
   } = req.body;
 
   if (
@@ -55,43 +52,58 @@ const createProduct = asyncHandler(async (req, res) => {
     !plotSize ||
     !plotArea ||
     !country ||
-    !planType
+    !planType ||
+    !city ||
+    !productNo
   ) {
     res.status(400);
-    throw new Error("Please fill all required fields");
-  }
-  if (!req.files || !req.files.mainImage || !req.files.planFile) {
-    res.status(400);
-    throw new Error("Main image and plan file are required");
+    throw new Error(
+      "Please fill all required fields, including city and product number"
+    );
   }
 
-  const product = new Product({
+  const productExists = await Product.findOne({ productNo });
+  if (productExists) {
+    res.status(400);
+    throw new Error("Product with this Product Number already exists.");
+  }
+
+  if (!req.files || !req.files.mainImage || !req.files.planFile) {
+    res.status(400);
+    throw new Error("Main image and at least one plan file are required");
+  }
+
+  const countryArray = country.split(",").map((c) => c.trim());
+  const cityArray = city.split(",").map((c) => c.trim());
+  const planFilesArray = req.files.planFile.map((file) => file.path);
+
+  const productData = {
+    ...req.body,
     user: req.user._id,
-    name,
-    description,
-    plotSize,
-    plotArea: Number(plotArea),
-    rooms: Number(rooms) || 0,
-    bathrooms: Number(bathrooms) || 0,
-    kitchen: Number(kitchen) || 0,
-    floors: Number(floors) || 0,
-    direction,
-    country,
-    planType,
-    price: Number(price),
-    salePrice: salePrice ? Number(salePrice) : 0,
+    country: countryArray,
+    city: cityArray,
     isSale: isSale === "true",
-    category,
-    propertyType,
-    status: req.user.role === "admin" ? "Published" : "Pending Review",
     mainImage: req.files.mainImage[0].path,
-    planFile: req.files.planFile[0].path,
+    planFile: planFilesArray,
     galleryImages: req.files.galleryImages
       ? req.files.galleryImages.map((file) => file.path)
       : [],
-    youtubeLink,
-  });
+    headerImage: req.files.headerImage
+      ? req.files.headerImage[0].path
+      : undefined,
+    status: req.user.role === "admin" ? "Published" : "Pending Review",
+  };
 
+  // ++ CAMBIO AÑADIDO: Añadir detalles de contacto solo si el tipo de plan es el correcto
+  if (planType === "Construction Products") {
+    productData.contactDetails = {
+      name: contactName,
+      email: contactEmail,
+      phone: contactPhone,
+    };
+  }
+
+  const product = new Product(productData);
   const createdProduct = await product.save();
   res.status(201).json(createdProduct);
 });
@@ -100,36 +112,64 @@ const createProduct = asyncHandler(async (req, res) => {
 // @route   PUT /api/products/:id
 // @access  Private/ProfessionalOrAdmin
 const updateProduct = asyncHandler(async (req, res) => {
-  const { youtubeLink } = req.body;
+  const { country, city, productNo, contactName, contactEmail, contactPhone } =
+    req.body;
   const product = await Product.findById(req.params.id);
 
-  if (product) {
-    if (
-      product.user.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
-    ) {
-      res.status(401);
-      throw new Error("Not authorized to update this product");
-    }
-
-    Object.assign(product, req.body);
-    product.youtubeLink = youtubeLink || product.youtubeLink;
-
-    if (req.files) {
-      if (req.files.mainImage) product.mainImage = req.files.mainImage[0].path;
-      if (req.files.planFile) product.planFile = req.files.planFile[0].path;
-      if (req.files.galleryImages)
-        product.galleryImages = req.files.galleryImages.map(
-          (file) => file.path
-        );
-    }
-
-    const updatedProduct = await product.save();
-    res.json(updatedProduct);
-  } else {
+  if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
+
+  if (
+    product.user.toString() !== req.user._id.toString() &&
+    req.user.role !== "admin"
+  ) {
+    res.status(401);
+    throw new Error("Not authorized to update this product");
+  }
+
+  if (productNo && product.productNo !== productNo) {
+    const productExists = await Product.findOne({ productNo });
+    if (productExists) {
+      res.status(400);
+      throw new Error(
+        "Another product with this Product Number already exists."
+      );
+    }
+  }
+
+  Object.assign(product, req.body);
+
+  if (country) {
+    product.country = country.split(",").map((c) => c.trim());
+  }
+  if (city) {
+    product.city = city.split(",").map((c) => c.trim());
+  }
+
+  // ++ CAMBIO AÑADIDO: Actualizar detalles de contacto
+  if (product.planType === "Construction Products") {
+    if (!product.contactDetails) product.contactDetails = {};
+    if (contactName !== undefined) product.contactDetails.name = contactName;
+    if (contactEmail !== undefined) product.contactDetails.email = contactEmail;
+    if (contactPhone !== undefined) product.contactDetails.phone = contactPhone;
+  }
+
+  if (req.files) {
+    if (req.files.mainImage) product.mainImage = req.files.mainImage[0].path;
+    if (req.files.headerImage)
+      product.headerImage = req.files.headerImage[0].path;
+    if (req.files.galleryImages)
+      product.galleryImages = req.files.galleryImages.map((file) => file.path);
+    if (req.files.planFile && req.files.planFile.length > 0) {
+      const newPlanFiles = req.files.planFile.map((file) => file.path);
+      product.planFile = [...product.planFile, ...newPlanFiles];
+    }
+  }
+
+  const updatedProduct = await product.save();
+  res.json(updatedProduct);
 });
 
 // @desc    Delete a product
@@ -153,12 +193,9 @@ const deleteProduct = asyncHandler(async (req, res) => {
   }
 });
 
-// ==========================================================
-// ✨ NEW FUNCTION TO ADD REVIEWS ✨
-// ==========================================================
 // @desc    Create a new review for a product
 // @route   POST /api/products/:id/reviews
-// @access  Private (for logged-in users)
+// @access  Private
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
 
@@ -170,17 +207,14 @@ const createProductReview = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
 
   if (product) {
-    // Check if the user has already reviewed this product
     const alreadyReviewed = product.reviews.find(
       (r) => r.user.toString() === req.user._id.toString()
     );
-
     if (alreadyReviewed) {
       res.status(400);
       throw new Error("Product already reviewed by this user");
     }
 
-    // Create the new review object
     const review = {
       name: req.user.name,
       rating: Number(rating),
@@ -188,11 +222,7 @@ const createProductReview = asyncHandler(async (req, res) => {
       user: req.user._id,
     };
 
-    // Add the new review to the product's reviews array
     product.reviews.push(review);
-
-    // The middleware in the model will automatically update numReviews and rating
-
     await product.save();
     res.status(201).json({ message: "Review added successfully" });
   } else {
@@ -207,6 +237,5 @@ module.exports = {
   createProduct,
   updateProduct,
   deleteProduct,
-  // ++ CHANGE HERE: Export the new function
   createProductReview,
 };

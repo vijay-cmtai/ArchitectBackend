@@ -18,6 +18,7 @@ const orderRoutes = require("./routes/orderRoutes.js");
 const adminRoutes = require("./routes/adminRoutes");
 const wishlistRoutes = require("./routes/wishlistRoutes.js");
 const blogRoutes = require("./routes/blogRoutes.js");
+const galleryRoutes = require("./routes/galleryRoutes.js");
 
 dotenv.config();
 connectDB();
@@ -45,6 +46,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("api/gallery", galleryRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

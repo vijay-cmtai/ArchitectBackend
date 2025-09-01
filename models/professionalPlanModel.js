@@ -2,7 +2,6 @@
 
 const mongoose = require("mongoose");
 
-// ++ CHANGE HERE: Added the same review schema as in the product model
 const reviewSchema = mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -21,12 +20,14 @@ const reviewSchema = mongoose.Schema(
 
 const professionalPlanSchema = mongoose.Schema(
   {
-    professional: {
+    // ++ CAMPO MODIFICADO ++ (para coincidir con Product)
+    user: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
       ref: "User",
     },
-    planName: {
+    // ++ CAMPO MODIFICADO ++ (para coincidir con Product)
+    name: {
       type: String,
       required: [true, "Plan name is required"],
       trim: true,
@@ -35,14 +36,17 @@ const professionalPlanSchema = mongoose.Schema(
       type: String,
       required: [true, "Description is required"],
     },
-    // ... all other fields remain the same ...
-    plotSize: { type: String, required: [true, "Plot size is required"] },
-    plotArea: { type: Number, required: [true, "Plot area is required"] },
-    rooms: {
-      type: Number,
-      required: [true, "Number of rooms (BHK) is required"],
-      default: 0,
+
+    // ++ NUEVO CAMPO AÑADIDO ++
+    productNo: {
+      type: String,
+      required: [true, "Product Number is required"],
+      unique: true, // Asegura que cada número de producto sea único
     },
+
+    plotSize: { type: String, required: true },
+    plotArea: { type: Number, required: true },
+    rooms: { type: Number, required: true, default: 0 },
     bathrooms: { type: Number, default: 0 },
     kitchen: { type: Number, default: 0 },
     floors: { type: Number, default: 1 },
@@ -59,26 +63,48 @@ const professionalPlanSchema = mongoose.Schema(
         "South-West",
       ],
     },
-    country: { type: String, required: [true, "Country is required"] },
+
+    // ++ NUEVO CAMPO AÑADIDO ++
+    city: {
+      type: [String], // Permite múltiples ciudades
+      required: true,
+    },
+
+    // ++ CAMPO MODIFICADO ++ (de String a Array de Strings)
+    country: { type: [String], required: true },
     planType: {
       type: String,
-      required: [true, "Plan type is required"],
+      required: true,
       enum: [
         "Floor Plans",
-        "3D Elevations",
+        "Floor Plan + 3D Elevations", // Opción añadida para coincidir
         "Interior Designs",
         "Construction Products",
       ],
     },
-    price: { type: Number, required: [true, "Price is required"], default: 0 },
-    category: { type: String, required: [true, "Category is required"] },
-    status: { type: String, enum: ["Published"], default: "Published" },
-    mainImage: { type: String, required: [true, "Main image is required"] },
-    galleryImages: [{ type: String }],
-    planFile: { type: String, required: [true, "Plan file is required"] },
-    youtubeLink: { type: String, trim: true },
+    price: { type: Number, required: true, default: 0 },
 
-    // ++ CHANGE HERE: Added rating, numReviews, and the reviews array
+    // ++ NUEVOS CAMPOS AÑADIDOS ++
+    salePrice: { type: Number, default: 0 },
+    isSale: { type: Boolean, default: false },
+    propertyType: { type: String, enum: ["Residential", "Commercial"] },
+
+    category: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ["Published", "Pending Review", "Draft"],
+      default: "Pending Review", // Coincide con Product
+    },
+    mainImage: { type: String, required: true },
+    galleryImages: [{ type: String }],
+
+    // ++ CAMPO MODIFICADO ++ (de String a Array de Strings)
+    planFile: { type: [String], required: true },
+
+    // ++ NUEVO CAMPO AÑADIDO ++
+    headerImage: { type: String },
+
+    youtubeLink: { type: String, trim: true },
     rating: { type: Number, default: 0 },
     numReviews: { type: Number, default: 0 },
     reviews: [reviewSchema],
@@ -88,7 +114,6 @@ const professionalPlanSchema = mongoose.Schema(
   }
 );
 
-// ++ CHANGE HERE: Added middleware to auto-calculate average rating
 professionalPlanSchema.pre("save", function (next) {
   if (this.isModified("reviews")) {
     const totalRating = this.reviews.reduce(

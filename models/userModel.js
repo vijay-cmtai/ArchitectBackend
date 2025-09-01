@@ -26,11 +26,10 @@ const userSchema = mongoose.Schema(
     // Profile Image
     photoUrl: { type: String },
 
-    // For Professional
+    // Fields for Professional & Contractor
     profession: { type: String },
-    // ++ CHANGE HERE: Added fields for professional's documents
-    businessCertificationUrl: { type: String },
-    shopImageUrl: { type: String },
+    businessCertificationUrl: { type: String }, // Now common for Professional & Contractor
+    shopImageUrl: { type: String }, // Now common for Professional & Contractor
 
     // For Seller
     businessName: { type: String },

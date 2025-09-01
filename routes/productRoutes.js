@@ -1,5 +1,3 @@
-// routes/productRoutes.js
-
 const express = require("express");
 const router = express.Router();
 const {
@@ -8,7 +6,6 @@ const {
   createProduct,
   updateProduct,
   deleteProduct,
-  // ++ CHANGE HERE: Import the new controller function
   createProductReview,
 } = require("../controllers/admin/productController.js");
 const {
@@ -20,14 +17,15 @@ const upload = require("../middleware/uploadMiddleware.js");
 const handleFileUploads = upload.fields([
   { name: "mainImage", maxCount: 1 },
   { name: "galleryImages", maxCount: 5 },
-  { name: "planFile", maxCount: 1 },
+  { name: "planFile", maxCount: 10 },
+  { name: "headerImage", maxCount: 1 },
 ]);
 
 // --- Public Routes ---
 router.route("/").get(getProducts);
 router.route("/:id").get(getProductById);
 
-// --- Protected Routes for Creating/Editing Products ---
+// --- Protected Routes ---
 router
   .route("/")
   .post(protect, professionalOrAdminProtect, handleFileUploads, createProduct);
@@ -37,8 +35,6 @@ router
   .put(protect, professionalOrAdminProtect, handleFileUploads, updateProduct)
   .delete(protect, professionalOrAdminProtect, deleteProduct);
 
-// --- ++ NEW ROUTE TO ADD REVIEWS ++ ---
-// This route allows any logged-in user ('protect') to add a review to a specific product.
 router.route("/:id/reviews").post(protect, createProductReview);
 
 module.exports = router;
