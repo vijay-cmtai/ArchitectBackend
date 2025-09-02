@@ -1,5 +1,3 @@
-// models/productModel.js
-
 const mongoose = require("mongoose");
 
 const reviewSchema = mongoose.Schema(
@@ -54,10 +52,7 @@ const productSchema = mongoose.Schema(
         "South-West",
       ],
     },
-    city: {
-      type: [String],
-      required: true,
-    },
+    city: { type: [String], required: true },
     country: { type: [String], required: true },
     planType: {
       type: String,
@@ -92,26 +87,18 @@ const productSchema = mongoose.Schema(
       email: { type: String, trim: true },
       phone: { type: String, trim: true },
     },
-
-    // --- SEO FIELDS ADDED HERE ---
     seo: {
-      title: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      description: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      keywords: {
-        type: String,
-        trim: true,
-        default: "",
-      },
+      title: { type: String, trim: true, default: "" },
+      description: { type: String, trim: true, default: "" },
+      keywords: { type: String, trim: true, default: "" },
+      altText: { type: String, trim: true, default: "" }, // Alt Text for mainImage
     },
-    // --- END OF SEO FIELDS ---
+    taxRate: { type: Number, default: 0 }, // e.g., 18 for 18%
+    discountPercentage: { type: Number, default: 0, min: 0, max: 100 },
+    crossSellProducts: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    ],
+    upSellProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
   },
   {
     timestamps: true,
