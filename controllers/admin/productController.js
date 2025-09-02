@@ -2,18 +2,17 @@ const asyncHandler = require("express-async-handler");
 const Product = require("../../models/productModel.js");
 
 // @desc    Fetch all products
-// @route   GET /api/products
-// @access  Public
 const getProducts = asyncHandler(async (req, res) => {
   const products = await Product.find({}).populate("user", "name profession");
   res.json(products);
 });
 
-// @desc    Fetch a single product by ID
-// @route   GET /api/products/:id
-// @access  Public
+// @desc    Fetch a single product by ID (now populates related products)
 const getProductById = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findById(req.params.id)
+    .populate("crossSellProducts", "name mainImage price salePrice isSale slug") // Added slug for linking
+    .populate("upSellProducts", "name mainImage price salePrice isSale slug");
+
   if (product) {
     res.json(product);
   } else {
@@ -23,12 +22,10 @@ const getProductById = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create a new product
-// @route   POST /api/products
-// @access  Private/ProfessionalOrAdmin
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
-    description, // Get description for SEO default
+    description,
     price,
     category,
     plotSize,
@@ -41,10 +38,15 @@ const createProduct = asyncHandler(async (req, res) => {
     contactName,
     contactEmail,
     contactPhone,
-    // --- GET SEO FIELDS FROM REQUEST BODY ---
+    // New fields
     seoTitle,
     seoDescription,
     seoKeywords,
+    seoAltText,
+    taxRate,
+    discountPercentage,
+    crossSellProducts,
+    upSellProducts,
   } = req.body;
 
   if (
@@ -96,7 +98,6 @@ const createProduct = asyncHandler(async (req, res) => {
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
 
-  // Add contact details if applicable
   if (planType === "Construction Products") {
     productData.contactDetails = {
       name: contactName,
@@ -105,12 +106,26 @@ const createProduct = asyncHandler(async (req, res) => {
     };
   }
 
-  // --- ADD SEO DATA TO THE NEW PRODUCT ---
   productData.seo = {
-    title: seoTitle || name, // Default to product name if SEO title is empty
-    description: seoDescription || description.substring(0, 160), // Default to first 160 chars of description
+    title: seoTitle || name,
+    description: seoDescription || description.substring(0, 160),
     keywords: seoKeywords || "",
+    altText: seoAltText || name, // Default alt text to product name
   };
+
+  if (taxRate) productData.taxRate = Number(taxRate);
+  if (discountPercentage)
+    productData.discountPercentage = Number(discountPercentage);
+  if (crossSellProducts)
+    productData.crossSellProducts = crossSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  if (upSellProducts)
+    productData.upSellProducts = upSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
 
   const product = new Product(productData);
   const createdProduct = await product.save();
@@ -118,8 +133,6 @@ const createProduct = asyncHandler(async (req, res) => {
 });
 
 // @desc    Update an existing product
-// @route   PUT /api/products/:id
-// @access  Private/ProfessionalOrAdmin
 const updateProduct = asyncHandler(async (req, res) => {
   const {
     country,
@@ -128,10 +141,15 @@ const updateProduct = asyncHandler(async (req, res) => {
     contactName,
     contactEmail,
     contactPhone,
-    // --- GET SEO FIELDS FROM REQUEST BODY ---
+    // New fields
     seoTitle,
     seoDescription,
     seoKeywords,
+    seoAltText,
+    taxRate,
+    discountPercentage,
+    crossSellProducts,
+    upSellProducts,
   } = req.body;
   const product = await Product.findById(req.params.id);
 
@@ -151,20 +169,18 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (productNo && product.productNo !== productNo) {
     const productExists = await Product.findOne({ productNo });
     if (productExists) {
-      res.status(400);
-      throw new Error(
-        "Another product with this Product Number already exists."
-      );
+      res
+        .status(400)
+        .throw(
+          new Error("Another product with this Product Number already exists.")
+        );
     }
   }
 
-  // Update all fields from req.body
   Object.assign(product, req.body);
-
   if (country) product.country = country.split(",").map((c) => c.trim());
   if (city) product.city = city.split(",").map((c) => c.trim());
 
-  // Update contact details
   if (product.planType === "Construction Products") {
     if (!product.contactDetails) product.contactDetails = {};
     if (contactName !== undefined) product.contactDetails.name = contactName;
@@ -172,13 +188,26 @@ const updateProduct = asyncHandler(async (req, res) => {
     if (contactPhone !== undefined) product.contactDetails.phone = contactPhone;
   }
 
-  // --- UPDATE SEO FIELDS IF THEY ARE PROVIDED ---
-  if (!product.seo) product.seo = {}; // Ensure the seo object exists
+  if (!product.seo) product.seo = {};
   if (seoTitle !== undefined) product.seo.title = seoTitle;
   if (seoDescription !== undefined) product.seo.description = seoDescription;
   if (seoKeywords !== undefined) product.seo.keywords = seoKeywords;
+  if (seoAltText !== undefined) product.seo.altText = seoAltText;
 
-  // Handle file updates
+  if (taxRate !== undefined) product.taxRate = Number(taxRate);
+  if (discountPercentage !== undefined)
+    product.discountPercentage = Number(discountPercentage);
+  if (crossSellProducts !== undefined)
+    product.crossSellProducts = crossSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  if (upSellProducts !== undefined)
+    product.upSellProducts = upSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
   if (req.files) {
     if (req.files.mainImage) product.mainImage = req.files.mainImage[0].path;
     if (req.files.headerImage)
@@ -196,8 +225,6 @@ const updateProduct = asyncHandler(async (req, res) => {
 });
 
 // @desc    Delete a product
-// @route   DELETE /api/products/:id
-// @access  Private/ProfessionalOrAdmin
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (product) {
@@ -217,18 +244,13 @@ const deleteProduct = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create a new review for a product
-// @route   POST /api/products/:id/reviews
-// @access  Private
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
-
   if (!rating || !comment) {
     res.status(400);
     throw new Error("Rating and comment are required");
   }
-
   const product = await Product.findById(req.params.id);
-
   if (product) {
     const alreadyReviewed = product.reviews.find(
       (r) => r.user.toString() === req.user._id.toString()
@@ -237,7 +259,6 @@ const createProductReview = asyncHandler(async (req, res) => {
       res.status(400);
       throw new Error("Product already reviewed by this user");
     }
-
     const review = {
       name: req.user.name,
       rating: Number(rating),
