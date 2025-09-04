@@ -5,24 +5,26 @@ const formatSlug = (slug) => {
   if (!slug) return "";
   return slug
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "") 
-    .replace(/\s+/g, "-") 
-    .replace(/-+/g, "-"); // Collapse multiple dashes
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
 };
 
 const processStringToArray = (str) => {
   if (!str || typeof str !== "string") return [];
   return str
-    .split(",") 
-    .map((item) => item.trim()) 
+    .split(",")
+    .map((item) => item.trim())
     .filter(Boolean);
 };
+
 const getPublishedPosts = asyncHandler(async (req, res) => {
   const posts = await BlogPost.find({ status: "Published" }).sort({
     createdAt: -1,
   });
   res.json(posts);
 });
+
 const getPostBySlug = asyncHandler(async (req, res) => {
   const post = await BlogPost.findOne({ slug: req.params.slug });
   if (post) {
@@ -32,10 +34,13 @@ const getPostBySlug = asyncHandler(async (req, res) => {
     throw new Error("Blog post not found");
   }
 });
+
 const getAllPostsAdmin = asyncHandler(async (req, res) => {
   const posts = await BlogPost.find({}).sort({ createdAt: -1 });
   res.json(posts);
 });
+
+// ✅ CREATE POST UPDATED
 const createPost = asyncHandler(async (req, res) => {
   const {
     title,
@@ -45,6 +50,7 @@ const createPost = asyncHandler(async (req, res) => {
     author,
     status,
     tags,
+    h1Text, // Naya field yahan add kiya
     metaDescription,
     metaKeywords,
     imageAltText,
@@ -85,6 +91,7 @@ const createPost = asyncHandler(async (req, res) => {
     status: status || "Draft",
     mainImage: req.file.path,
     tags: processedTags,
+    h1Text, // Naya field save karein
     metaDescription,
     metaKeywords: processedKeywords,
     imageAltText,
@@ -94,6 +101,8 @@ const createPost = asyncHandler(async (req, res) => {
   const createdPost = await post.save();
   res.status(201).json(createdPost);
 });
+
+// ✅ UPDATE POST UPDATED
 const updatePost = asyncHandler(async (req, res) => {
   const {
     title,
@@ -103,6 +112,7 @@ const updatePost = asyncHandler(async (req, res) => {
     author,
     status,
     tags,
+    h1Text, // Naya field yahan add kiya
     metaDescription,
     metaKeywords,
     imageAltText,
@@ -118,6 +128,8 @@ const updatePost = asyncHandler(async (req, res) => {
     post.author = author || post.author;
     post.status = status || post.status;
 
+    // Naye fields ko conditionally update karein taaki empty string bhi save ho sake
+    if ("h1Text" in req.body) post.h1Text = h1Text;
     if ("metaDescription" in req.body) post.metaDescription = metaDescription;
     if ("imageAltText" in req.body) post.imageAltText = imageAltText;
     if ("imageTitleText" in req.body) post.imageTitleText = imageTitleText;
@@ -127,7 +139,7 @@ const updatePost = asyncHandler(async (req, res) => {
       if (formattedSlug !== post.slug) {
         const slugExists = await BlogPost.findOne({
           slug: formattedSlug,
-          _id: { $ne: req.params.id }, 
+          _id: { $ne: req.params.id },
         });
         if (slugExists) {
           res.status(400);
@@ -155,6 +167,7 @@ const updatePost = asyncHandler(async (req, res) => {
     throw new Error("Blog post not found");
   }
 });
+
 const deletePost = asyncHandler(async (req, res) => {
   const post = await BlogPost.findById(req.params.id);
 

@@ -14,7 +14,6 @@ const blogPostSchema = mongoose.Schema(
       index: true,
     },
     description: {
-      // Yeh blog ka short summary hai
       type: String,
       required: true,
     },
@@ -28,7 +27,6 @@ const blogPostSchema = mongoose.Schema(
       default: "Admin",
     },
     mainImage: {
-      // Yeh image ka path/URL hai
       type: String,
       required: true,
     },
@@ -41,24 +39,22 @@ const blogPostSchema = mongoose.Schema(
       type: [String],
       default: [],
     },
-
-    // ===============================================
-    // ✅ NAYE FIELDS YAHAN ADD KIYE GAYE HAIN
-    // ===============================================
-
-    // --- SEO Fields ---
+    h1Text: {
+      type: String,
+      trim: true,
+    },
     metaDescription: {
       type: String, // Search engine mein dikhne wala description (150-160 chars)
       trim: true,
     },
     metaKeywords: {
-      type: [String], // SEO ke liye keywords ka array
+      type: [String], 
       default: [],
     },
 
     // --- Image Attribute Fields ---
     imageAltText: {
-      type: String, // Image ka alt text (Accessibility aur SEO ke liye bahut zaroori)
+      type: String, 
       required: [true, "Image alt text is required for accessibility."],
       trim: true,
     },
