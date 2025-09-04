@@ -1,31 +1,28 @@
-// controllers/blogPostController.js
-
 const asyncHandler = require("express-async-handler");
 const BlogPost = require("../models/blogPostModel.js");
 
-// Helper function to format slug
 const formatSlug = (slug) => {
   if (!slug) return "";
   return slug
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "") // remove invalid chars
-    .replace(/\s+/g, "-") // collapse whitespace and replace by -
-    .replace(/-+/g, "-"); // collapse dashes
+    .replace(/[^a-z0-9\s-]/g, "") 
+    .replace(/\s+/g, "-") 
+    .replace(/-+/g, "-"); // Collapse multiple dashes
 };
 
-// @desc    Fetch all published blog posts
-// @route   GET /api/blogs
-// @access  Public
+const processStringToArray = (str) => {
+  if (!str || typeof str !== "string") return [];
+  return str
+    .split(",") 
+    .map((item) => item.trim()) 
+    .filter(Boolean);
+};
 const getPublishedPosts = asyncHandler(async (req, res) => {
   const posts = await BlogPost.find({ status: "Published" }).sort({
     createdAt: -1,
   });
   res.json(posts);
 });
-
-// @desc    Fetch a single blog post by slug
-// @route   GET /api/blogs/slug/:slug
-// @access  Public
 const getPostBySlug = asyncHandler(async (req, res) => {
   const post = await BlogPost.findOne({ slug: req.params.slug });
   if (post) {
@@ -35,32 +32,38 @@ const getPostBySlug = asyncHandler(async (req, res) => {
     throw new Error("Blog post not found");
   }
 });
-
-// --- ADMIN ONLY ---
-
-// @desc    Fetch ALL posts (published and drafts) for admin
-// @route   GET /api/blogs/all
-// @access  Private/Admin
 const getAllPostsAdmin = asyncHandler(async (req, res) => {
   const posts = await BlogPost.find({}).sort({ createdAt: -1 });
   res.json(posts);
 });
-
-// @desc    Create a new blog post
-// @route   POST /api/blogs
-// @access  Private/Admin
 const createPost = asyncHandler(async (req, res) => {
-  let { title, slug, description, content, author, status } = req.body;
+  const {
+    title,
+    slug,
+    description,
+    content,
+    author,
+    status,
+    tags,
+    metaDescription,
+    metaKeywords,
+    imageAltText,
+    imageTitleText,
+  } = req.body;
 
-  if (!title || !slug || !description || !content) {
+  // Validation
+  if (!title || !slug || !description || !content || !imageAltText) {
     res.status(400);
-    throw new Error("Title, Slug, Description, and Content are required.");
+    throw new Error(
+      "Title, Slug, Description, Content, and Image Alt Text are required."
+    );
   }
   if (!req.file) {
     res.status(400);
-    throw new Error("Main image is required.");
+    throw new Error("A main image for the blog post is required.");
   }
 
+  // Check for unique slug
   const formattedSlug = formatSlug(slug);
   const slugExists = await BlogPost.findOne({ slug: formattedSlug });
   if (slugExists) {
@@ -68,6 +71,11 @@ const createPost = asyncHandler(async (req, res) => {
     throw new Error("This slug is already in use. Please choose a unique one.");
   }
 
+  // Process tags and keywords from string to array
+  const processedTags = processStringToArray(tags);
+  const processedKeywords = processStringToArray(metaKeywords);
+
+  // Create new blog post instance
   const post = new BlogPost({
     title,
     slug: formattedSlug,
@@ -76,17 +84,31 @@ const createPost = asyncHandler(async (req, res) => {
     author: author || "Admin",
     status: status || "Draft",
     mainImage: req.file.path,
+    tags: processedTags,
+    metaDescription,
+    metaKeywords: processedKeywords,
+    imageAltText,
+    imageTitleText,
   });
 
   const createdPost = await post.save();
   res.status(201).json(createdPost);
 });
-
-// @desc    Update a blog post
-// @route   PUT /api/blogs/:id
-// @access  Private/Admin
 const updatePost = asyncHandler(async (req, res) => {
-  const { title, slug, description, content, author, status } = req.body;
+  const {
+    title,
+    slug,
+    description,
+    content,
+    author,
+    status,
+    tags,
+    metaDescription,
+    metaKeywords,
+    imageAltText,
+    imageTitleText,
+  } = req.body;
+
   const post = await BlogPost.findById(req.params.id);
 
   if (post) {
@@ -96,22 +118,34 @@ const updatePost = asyncHandler(async (req, res) => {
     post.author = author || post.author;
     post.status = status || post.status;
 
+    if ("metaDescription" in req.body) post.metaDescription = metaDescription;
+    if ("imageAltText" in req.body) post.imageAltText = imageAltText;
+    if ("imageTitleText" in req.body) post.imageTitleText = imageTitleText;
+
     if (slug) {
       const formattedSlug = formatSlug(slug);
-      // Check if another post is already using the new slug
-      const slugExists = await BlogPost.findOne({
-        slug: formattedSlug,
-        _id: { $ne: req.params.id },
-      });
-      if (slugExists) {
-        res.status(400);
-        throw new Error("This slug is already in use by another post.");
+      if (formattedSlug !== post.slug) {
+        const slugExists = await BlogPost.findOne({
+          slug: formattedSlug,
+          _id: { $ne: req.params.id }, 
+        });
+        if (slugExists) {
+          res.status(400);
+          throw new Error("This slug is already in use by another post.");
+        }
+        post.slug = formattedSlug;
       }
-      post.slug = formattedSlug;
     }
 
     if (req.file) {
       post.mainImage = req.file.path;
+    }
+
+    if ("tags" in req.body) {
+      post.tags = processStringToArray(tags);
+    }
+    if ("metaKeywords" in req.body) {
+      post.metaKeywords = processStringToArray(metaKeywords);
     }
 
     const updatedPost = await post.save();
@@ -121,15 +155,12 @@ const updatePost = asyncHandler(async (req, res) => {
     throw new Error("Blog post not found");
   }
 });
-
-// @desc    Delete a blog post
-// @route   DELETE /api/blogs/:id
-// @access  Private/Admin
 const deletePost = asyncHandler(async (req, res) => {
   const post = await BlogPost.findById(req.params.id);
+
   if (post) {
     await post.deleteOne();
-    res.json({ message: "Blog post removed" });
+    res.json({ message: "Blog post removed successfully" });
   } else {
     res.status(404);
     throw new Error("Blog post not found");
