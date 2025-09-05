@@ -51,7 +51,7 @@ const createCustomizationRequest = asyncHandler(async (req, res) => {
 
   // If a file was uploaded, add its path to our data object
   if (req.file) {
-    requestData.referenceFileUrl = req.file.path;
+    requestData.referenceFileUrl = req.file.location;
   }
 
   const request = await CustomizationRequest.create(requestData);

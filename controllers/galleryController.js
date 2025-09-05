@@ -24,7 +24,7 @@ const createGalleryItem = asyncHandler(async (req, res) => {
     title,
     category,
     relatedProduct: relatedProduct || undefined,
-    imageUrl: req.file.path, // La ruta del archivo subido por multer
+    imageUrl: req.file.location, // La ruta del archivo subido por multer
   });
 
   const createdItem = await galleryItem.save();

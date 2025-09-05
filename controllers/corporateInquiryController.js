@@ -32,7 +32,7 @@ const submitInquiry = asyncHandler(async (req, res) => {
   };
 
   if (req.file) {
-    inquiryData.projectBriefUrl = req.file.path;
+    inquiryData.projectBriefUrl = req.file.location;
   }
 
   const inquiry = await CorporateInquiry.create(inquiryData);

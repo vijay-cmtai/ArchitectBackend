@@ -89,7 +89,7 @@ const createPost = asyncHandler(async (req, res) => {
     content,
     author: author || "Admin",
     status: status || "Draft",
-    mainImage: req.file.path,
+    mainImage: req.file.location,
     tags: processedTags,
     h1Text, // Naya field save karein
     metaDescription,
@@ -150,7 +150,7 @@ const updatePost = asyncHandler(async (req, res) => {
     }
 
     if (req.file) {
-      post.mainImage = req.file.path;
+      post.mainImage = req.file.location;
     }
 
     if ("tags" in req.body) {
