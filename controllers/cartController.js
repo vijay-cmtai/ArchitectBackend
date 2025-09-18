@@ -1,13 +1,17 @@
+// src/controllers/cartController.js
+
 const asyncHandler = require("express-async-handler");
 const Cart = require("../models/cartModel.js");
+const Product = require("../models/productModel.js"); // Product model ko import karein
 
 // @desc    Get user's cart
 // @route   GET /api/cart
 // @access  Private
 const getCart = asyncHandler(async (req, res) => {
+  // Populate mein saari zaroori fields add karein
   const cart = await Cart.findOne({ user: req.user._id }).populate(
     "items.productId",
-    "name price"
+    "name price salePrice isSale taxRate discountPercentage" // Yahan fields add ki gayi hain
   );
 
   if (cart) {
@@ -23,28 +27,58 @@ const getCart = asyncHandler(async (req, res) => {
 // @route   POST /api/cart
 // @access  Private
 const addOrUpdateCartItem = asyncHandler(async (req, res) => {
-  const { productId, quantity, name, price, image, size } = req.body;
+  // Client se sirf productId aur quantity lein. Size optional ho sakta hai.
+  const { productId, quantity, size } = req.body;
   const userId = req.user._id;
+
+  // Product ki details database se fetch karein
+  const product = await Product.findById(productId);
+  if (!product) {
+    res.status(404);
+    throw new Error("Product not found");
+  }
 
   let cart = await Cart.findOne({ user: userId });
   if (!cart) {
     cart = await Cart.create({ user: userId, items: [] });
   }
 
-  const existingItem = cart.items.find(
+  const existingItemIndex = cart.items.findIndex(
     (item) => item.productId.toString() === productId
   );
 
-  if (existingItem) {
+  if (existingItemIndex > -1) {
     // If item exists, update its quantity
-    existingItem.quantity = quantity;
+    cart.items[existingItemIndex].quantity = quantity;
   } else {
-    // If item does not exist, add it to the cart
-    cart.items.push({ productId, quantity, name, price, image, size });
+    // If item does not exist, add it to the cart with all details from the product
+    const cartItem = {
+      productId: product._id,
+      name: product.name,
+      quantity,
+      // Store the effective price (sale price if available, otherwise regular price)
+      price:
+        product.isSale && product.salePrice > 0
+          ? product.salePrice
+          : product.price,
+      // Store all other relevant details
+      salePrice: product.salePrice,
+      isSale: product.isSale,
+      taxRate: product.taxRate,
+      discountPercentage: product.discountPercentage,
+      image: product.mainImage, // Assuming mainImage is the correct field
+      size: size || product.plotSize, // Use provided size or default from product
+    };
+    cart.items.push(cartItem);
   }
 
   const updatedCart = await cart.save();
-  res.status(201).json(updatedCart);
+  // Response mein updated cart ko populate karke bhejein taaki frontend ko hamesha latest data mile
+  const populatedCart = await updatedCart.populate(
+    "items.productId",
+    "name price salePrice isSale taxRate discountPercentage"
+  );
+  res.status(201).json(populatedCart);
 });
 
 // @desc    Remove an item from the cart
@@ -89,5 +123,5 @@ module.exports = {
   getCart,
   addOrUpdateCartItem,
   removeCartItem,
-  clearCart, // Export the new function
+  clearCart,
 };
