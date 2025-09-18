@@ -88,8 +88,25 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error("Product with this Product Number already exists.");
   }
 
-  const countryArray = country.split(",").map((c) => c.trim());
-  const cityArray = city.split(",").map((c) => c.trim());
+  // Handle country field - check if it's string or array
+  let countryArray;
+  if (typeof country === "string") {
+    countryArray = country.split(",").map((c) => c.trim());
+  } else if (Array.isArray(country)) {
+    countryArray = country;
+  } else {
+    countryArray = [country];
+  }
+
+  // Handle city field - check if it's string or array
+  let cityArray;
+  if (typeof city === "string") {
+    cityArray = city.split(",").map((c) => c.trim());
+  } else if (Array.isArray(city)) {
+    cityArray = city;
+  } else {
+    cityArray = [city];
+  }
 
   const productData = {
     ...req.body,
@@ -141,18 +158,28 @@ const createProduct = asyncHandler(async (req, res) => {
 
   if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
 
+  // Handle crossSellProducts - check if it's string or array
   if (crossSellProducts) {
-    productData.crossSellProducts = crossSellProducts
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
+    if (typeof crossSellProducts === "string") {
+      productData.crossSellProducts = crossSellProducts
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(crossSellProducts)) {
+      productData.crossSellProducts = crossSellProducts.filter(Boolean);
+    }
   }
 
+  // Handle upSellProducts - check if it's string or array
   if (upSellProducts) {
-    productData.upSellProducts = upSellProducts
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
+    if (typeof upSellProducts === "string") {
+      productData.upSellProducts = upSellProducts
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(upSellProducts)) {
+      productData.upSellProducts = upSellProducts.filter(Boolean);
+    }
   }
 
   console.log("Final product data:", {
@@ -216,9 +243,98 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  Object.assign(product, req.body);
-  if (country) product.country = country.split(",").map((c) => c.trim());
-  if (city) product.city = city.split(",").map((c) => c.trim());
+  // Don't use Object.assign directly - it causes type casting issues with FormData
+  // Update fields individually with proper type handling
+  const fieldsToUpdate = [
+    "name",
+    "description",
+    "price",
+    "salePrice",
+    "category",
+    "plotSize",
+    "plotArea",
+    "rooms",
+    "bathrooms",
+    "kitchen",
+    "floors",
+    "youtubeLink",
+    "productNo",
+  ];
+
+  fieldsToUpdate.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      // Handle numeric fields
+      if (
+        [
+          "price",
+          "salePrice",
+          "plotArea",
+          "rooms",
+          "bathrooms",
+          "kitchen",
+          "floors",
+        ].includes(field)
+      ) {
+        const value = Array.isArray(req.body[field])
+          ? req.body[field][0]
+          : req.body[field];
+        product[field] = value ? Number(value) : undefined;
+      } else {
+        // Handle string fields - take first element if array
+        product[field] = Array.isArray(req.body[field])
+          ? req.body[field][0]
+          : req.body[field];
+      }
+    }
+  });
+
+  // Handle special fields that might come as arrays from FormData
+  if (req.body.direction !== undefined) {
+    product.direction = Array.isArray(req.body.direction)
+      ? req.body.direction[0]
+      : req.body.direction;
+  }
+
+  if (req.body.planType !== undefined) {
+    product.planType = Array.isArray(req.body.planType)
+      ? req.body.planType[0]
+      : req.body.planType;
+  }
+
+  if (req.body.propertyType !== undefined) {
+    product.propertyType = Array.isArray(req.body.propertyType)
+      ? req.body.propertyType[0]
+      : req.body.propertyType;
+  }
+
+  if (req.body.isSale !== undefined) {
+    const saleValue = Array.isArray(req.body.isSale)
+      ? req.body.isSale[0]
+      : req.body.isSale;
+    product.isSale = saleValue === "true" || saleValue === true;
+  }
+
+  // Handle country field - check if it's string or array
+  if (country !== undefined) {
+    if (typeof country === "string") {
+      product.country = country.split(",").map((c) => c.trim());
+    } else if (Array.isArray(country)) {
+      product.country = country;
+    } else {
+      product.country = [country];
+    }
+  }
+
+  // Handle city field - check if it's string or array
+  if (city !== undefined) {
+    if (typeof city === "string") {
+      product.city = city.split(",").map((c) => c.trim());
+    } else if (Array.isArray(city)) {
+      product.city = city;
+    } else {
+      product.city = [city];
+    }
+  }
 
   if (product.planType === "Construction Products") {
     if (!product.contactDetails) product.contactDetails = {};
@@ -234,16 +350,30 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (seoAltText !== undefined) product.seo.altText = seoAltText;
 
   if (taxRate !== undefined) product.taxRate = Number(taxRate);
-  if (crossSellProducts !== undefined)
-    product.crossSellProducts = crossSellProducts
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-  if (upSellProducts !== undefined)
-    product.upSellProducts = upSellProducts
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
+
+  // Handle crossSellProducts - check if it's string or array
+  if (crossSellProducts !== undefined) {
+    if (typeof crossSellProducts === "string") {
+      product.crossSellProducts = crossSellProducts
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(crossSellProducts)) {
+      product.crossSellProducts = crossSellProducts.filter(Boolean);
+    }
+  }
+
+  // Handle upSellProducts - check if it's string or array
+  if (upSellProducts !== undefined) {
+    if (typeof upSellProducts === "string") {
+      product.upSellProducts = upSellProducts
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean);
+    } else if (Array.isArray(upSellProducts)) {
+      product.upSellProducts = upSellProducts.filter(Boolean);
+    }
+  }
 
   if (req.files) {
     const getFilePath = (file) => file.location || file.path;
