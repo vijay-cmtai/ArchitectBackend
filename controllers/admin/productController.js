@@ -22,6 +22,7 @@ const getProductById = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create a new product
+// CORRECTED and made more robust
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -38,7 +39,6 @@ const createProduct = asyncHandler(async (req, res) => {
     contactName,
     contactEmail,
     contactPhone,
-    // New fields
     seoTitle,
     seoDescription,
     seoKeywords,
@@ -49,6 +49,11 @@ const createProduct = asyncHandler(async (req, res) => {
     upSellProducts,
   } = req.body;
 
+  // Debug: Log the received files
+  console.log("Received files:", req.files);
+  console.log("Request body:", req.body);
+
+  // --- Initial Validation ---
   if (
     !name ||
     !price ||
@@ -66,70 +71,123 @@ const createProduct = asyncHandler(async (req, res) => {
     );
   }
 
+  // File validation - FIXED: Check if files exist and have the right structure
+  if (!req.files) {
+    res.status(400);
+    throw new Error("No files uploaded");
+  }
+
+  if (!req.files.mainImage || !req.files.mainImage[0]) {
+    res.status(400);
+    throw new Error("Main image is required");
+  }
+
+  if (!req.files.planFile || req.files.planFile.length === 0) {
+    res.status(400);
+    throw new Error("At least one plan file is required");
+  }
+
   const productExists = await Product.findOne({ productNo });
   if (productExists) {
     res.status(400);
     throw new Error("Product with this Product Number already exists.");
   }
 
-  if (!req.files || !req.files.mainImage || !req.files.planFile) {
-    res.status(400);
-    throw new Error("Main image and at least one plan file are required");
-  }
-
+  // --- Data Preparation ---
   const countryArray = country.split(",").map((c) => c.trim());
   const cityArray = city.split(",").map((c) => c.trim());
-  const planFilesArray = req.files.planFile.map((file) => file.path);
 
+  // Start building the product data object
   const productData = {
     ...req.body,
     user: req.user._id,
     country: countryArray,
     city: cityArray,
-    isSale: isSale === "true",
-    mainImage: req.files.mainImage[0].path,
-    planFile: planFilesArray,
-    galleryImages: req.files.galleryImages
-      ? req.files.galleryImages.map((file) => file.path)
-      : [],
-    headerImage: req.files.headerImage
-      ? req.files.headerImage[0].path
-      : undefined,
+    isSale: isSale === "true" || isSale === true,
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
 
+  // --- FIXED: Safely handle file assignments ---
+  // For AWS S3, the file path should be in req.files[fieldName][index].location
+  // For local storage, it would be req.files[fieldName][index].path
+
+  // Check if using S3 (has .location) or local storage (has .path)
+  const getFilePath = (file) => file.location || file.path;
+
+  try {
+    productData.mainImage = getFilePath(req.files.mainImage[0]);
+    productData.planFile = req.files.planFile.map((file) => getFilePath(file));
+
+    if (req.files.galleryImages && req.files.galleryImages.length > 0) {
+      productData.galleryImages = req.files.galleryImages.map((file) =>
+        getFilePath(file)
+      );
+    } else {
+      productData.galleryImages = [];
+    }
+
+    if (req.files.headerImage && req.files.headerImage[0]) {
+      productData.headerImage = getFilePath(req.files.headerImage[0]);
+    }
+  } catch (error) {
+    console.error("Error processing files:", error);
+    res.status(400);
+    throw new Error("Error processing uploaded files");
+  }
+
+  // --- Add conditional and structured data ---
   if (planType === "Construction Products") {
     productData.contactDetails = {
-      name: contactName,
-      email: contactEmail,
-      phone: contactPhone,
+      name: contactName || "",
+      email: contactEmail || "",
+      phone: contactPhone || "",
     };
   }
 
   productData.seo = {
     title: seoTitle || name,
-    description: seoDescription || description.substring(0, 160),
+    description:
+      seoDescription || (description ? description.substring(0, 160) : ""),
     keywords: seoKeywords || "",
-    altText: seoAltText || name, // Default alt text to product name
+    altText: seoAltText || name,
   };
 
-  if (taxRate) productData.taxRate = Number(taxRate);
-  if (discountPercentage)
+  if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
+  if (discountPercentage && !isNaN(discountPercentage))
     productData.discountPercentage = Number(discountPercentage);
-  if (crossSellProducts)
+
+  if (crossSellProducts) {
     productData.crossSellProducts = crossSellProducts
       .split(",")
       .map((id) => id.trim())
       .filter(Boolean);
-  if (upSellProducts)
+  }
+
+  if (upSellProducts) {
     productData.upSellProducts = upSellProducts
       .split(",")
       .map((id) => id.trim())
       .filter(Boolean);
+  }
 
-  const product = new Product(productData);
-  const createdProduct = await product.save();
-  res.status(201).json(createdProduct);
+  // Debug: Log the final product data
+  console.log("Final product data:", {
+    ...productData,
+    description: productData.description
+      ? productData.description.substring(0, 100) + "..."
+      : "No description",
+  });
+
+  // --- Create and save the product ---
+  try {
+    const product = new Product(productData);
+    const createdProduct = await product.save();
+    res.status(201).json(createdProduct);
+  } catch (saveError) {
+    console.error("Error saving product:", saveError);
+    res.status(400);
+    throw new Error(`Failed to save product: ${saveError.message}`);
+  }
 });
 
 // @desc    Update an existing product
@@ -141,7 +199,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     contactName,
     contactEmail,
     contactPhone,
-    // New fields
     seoTitle,
     seoDescription,
     seoKeywords,
@@ -151,6 +208,7 @@ const updateProduct = asyncHandler(async (req, res) => {
     crossSellProducts,
     upSellProducts,
   } = req.body;
+
   const product = await Product.findById(req.params.id);
 
   if (!product) {
@@ -169,11 +227,10 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (productNo && product.productNo !== productNo) {
     const productExists = await Product.findOne({ productNo });
     if (productExists) {
-      res
-        .status(400)
-        .throw(
-          new Error("Another product with this Product Number already exists.")
-        );
+      res.status(400);
+      throw new Error(
+        "Another product with this Product Number already exists."
+      );
     }
   }
 
@@ -208,15 +265,24 @@ const updateProduct = asyncHandler(async (req, res) => {
       .map((id) => id.trim())
       .filter(Boolean);
 
+  // FIXED: Handle file updates properly
   if (req.files) {
-    if (req.files.mainImage) product.mainImage = req.files.mainImage[0].path;
-    if (req.files.headerImage)
-      product.headerImage = req.files.headerImage[0].path;
-    if (req.files.galleryImages)
-      product.galleryImages = req.files.galleryImages.map((file) => file.path);
+    const getFilePath = (file) => file.location || file.path;
+
+    if (req.files.mainImage && req.files.mainImage[0]) {
+      product.mainImage = getFilePath(req.files.mainImage[0]);
+    }
+    if (req.files.headerImage && req.files.headerImage[0]) {
+      product.headerImage = getFilePath(req.files.headerImage[0]);
+    }
+    if (req.files.galleryImages && req.files.galleryImages.length > 0) {
+      product.galleryImages = req.files.galleryImages.map((file) =>
+        getFilePath(file)
+      );
+    }
     if (req.files.planFile && req.files.planFile.length > 0) {
-      const newPlanFiles = req.files.planFile.map((file) => file.path);
-      product.planFile = [...product.planFile, ...newPlanFiles];
+      const newPlanFiles = req.files.planFile.map((file) => getFilePath(file));
+      product.planFile = [...(product.planFile || []), ...newPlanFiles];
     }
   }
 
