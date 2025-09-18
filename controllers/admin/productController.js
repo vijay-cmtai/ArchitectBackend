@@ -10,7 +10,7 @@ const getProducts = asyncHandler(async (req, res) => {
 // @desc    Fetch a single product by ID (now populates related products)
 const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id)
-    .populate("crossSellProducts", "name mainImage price salePrice isSale slug") // Added slug for linking
+    .populate("crossSellProducts", "name mainImage price salePrice isSale slug")
     .populate("upSellProducts", "name mainImage price salePrice isSale slug");
 
   if (product) {
@@ -22,7 +22,6 @@ const getProductById = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create a new product
-// CORRECTED and made more robust
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -44,16 +43,13 @@ const createProduct = asyncHandler(async (req, res) => {
     seoKeywords,
     seoAltText,
     taxRate,
-    discountPercentage,
     crossSellProducts,
     upSellProducts,
   } = req.body;
 
-  // Debug: Log the received files
   console.log("Received files:", req.files);
   console.log("Request body:", req.body);
 
-  // --- Initial Validation ---
   if (
     !name ||
     !price ||
@@ -71,7 +67,6 @@ const createProduct = asyncHandler(async (req, res) => {
     );
   }
 
-  // File validation - FIXED: Check if files exist and have the right structure
   if (!req.files) {
     res.status(400);
     throw new Error("No files uploaded");
@@ -93,11 +88,9 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error("Product with this Product Number already exists.");
   }
 
-  // --- Data Preparation ---
   const countryArray = country.split(",").map((c) => c.trim());
   const cityArray = city.split(",").map((c) => c.trim());
 
-  // Start building the product data object
   const productData = {
     ...req.body,
     user: req.user._id,
@@ -107,11 +100,6 @@ const createProduct = asyncHandler(async (req, res) => {
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
 
-  // --- FIXED: Safely handle file assignments ---
-  // For AWS S3, the file path should be in req.files[fieldName][index].location
-  // For local storage, it would be req.files[fieldName][index].path
-
-  // Check if using S3 (has .location) or local storage (has .path)
   const getFilePath = (file) => file.location || file.path;
 
   try {
@@ -135,7 +123,6 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error("Error processing uploaded files");
   }
 
-  // --- Add conditional and structured data ---
   if (planType === "Construction Products") {
     productData.contactDetails = {
       name: contactName || "",
@@ -153,8 +140,6 @@ const createProduct = asyncHandler(async (req, res) => {
   };
 
   if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
-  if (discountPercentage && !isNaN(discountPercentage))
-    productData.discountPercentage = Number(discountPercentage);
 
   if (crossSellProducts) {
     productData.crossSellProducts = crossSellProducts
@@ -170,7 +155,6 @@ const createProduct = asyncHandler(async (req, res) => {
       .filter(Boolean);
   }
 
-  // Debug: Log the final product data
   console.log("Final product data:", {
     ...productData,
     description: productData.description
@@ -178,7 +162,6 @@ const createProduct = asyncHandler(async (req, res) => {
       : "No description",
   });
 
-  // --- Create and save the product ---
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
@@ -204,7 +187,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     seoKeywords,
     seoAltText,
     taxRate,
-    discountPercentage,
     crossSellProducts,
     upSellProducts,
   } = req.body;
@@ -252,8 +234,6 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (seoAltText !== undefined) product.seo.altText = seoAltText;
 
   if (taxRate !== undefined) product.taxRate = Number(taxRate);
-  if (discountPercentage !== undefined)
-    product.discountPercentage = Number(discountPercentage);
   if (crossSellProducts !== undefined)
     product.crossSellProducts = crossSellProducts
       .split(",")
@@ -265,7 +245,6 @@ const updateProduct = asyncHandler(async (req, res) => {
       .map((id) => id.trim())
       .filter(Boolean);
 
-  // FIXED: Handle file updates properly
   if (req.files) {
     const getFilePath = (file) => file.location || file.path;
 

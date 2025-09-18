@@ -94,7 +94,6 @@ const productSchema = mongoose.Schema(
       altText: { type: String, trim: true, default: "" }, // Alt Text for mainImage
     },
     taxRate: { type: Number, default: 0 }, // e.g., 18 for 18%
-    discountPercentage: { type: Number, default: 0, min: 0, max: 100 },
     crossSellProducts: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
     ],

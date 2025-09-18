@@ -9,6 +9,12 @@ const gallerySchema = mongoose.Schema(
       required: [true, "El título de la imagen es requerido"],
       trim: true,
     },
+    // ADDED: New field for SEO Alt Text
+    altText: {
+      type: String,
+      trim: true,
+      default: "", // Default to empty string
+    },
     imageUrl: {
       type: String,
       required: true,
@@ -18,11 +24,10 @@ const gallerySchema = mongoose.Schema(
       trim: true,
       default: "General",
     },
-    // Opcional: Para relacionar esta imagen con un producto específico
     relatedProduct: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Product", // Asegúrate de que 'Product' es el nombre de tu modelo de productos
-      required: false, // Hazlo opcional si quieres una galería general
+      ref: "Product",
+      required: false,
     },
   },
   {
