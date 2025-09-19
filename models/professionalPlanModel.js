@@ -1,3 +1,5 @@
+// models/professionalPlanModel.js
+
 const mongoose = require("mongoose");
 
 // Review schema (consistent with productModel)
@@ -79,11 +81,20 @@ const professionalPlanSchema = mongoose.Schema(
       email: { type: String, trim: true },
       phone: { type: String, trim: true },
     },
+    // ADDED: SEO fields to match Product model
     seo: {
       title: { type: String, trim: true, default: "" },
       description: { type: String, trim: true, default: "" },
       keywords: { type: String, trim: true, default: "" },
+      altText: { type: String, trim: true, default: "" }, // Alt Text for mainImage
     },
+    // ADDED: Tax Rate
+    taxRate: { type: Number, default: 0 },
+    // ADDED: Cross-sell and Up-sell fields
+    crossSellProducts: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    ],
+    upSellProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
   },
   {
     timestamps: true,
