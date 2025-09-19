@@ -1,11 +1,14 @@
+// controllers/professionalPlanController.js
+
 const asyncHandler = require("express-async-handler");
 const ProfessionalPlan = require("../../models/professionalPlanModel.js");
 
 // @desc    Get all approved plans for public view
 const getAllApprovedPlans = asyncHandler(async (req, res) => {
-  const plans = await ProfessionalPlan.find({
-    status: { $in: ["Approved", "Published"] },
-  }).populate("user", "name profession");
+  const plans = await ProfessionalPlan.find({ status: "Approved" }).populate(
+    "user",
+    "name profession"
+  );
   res.json(plans);
 });
 
@@ -29,8 +32,9 @@ const getPlanById = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Create a new plan
+// @desc    Create a new plan (updated to be like createProduct)
 const createPlan = asyncHandler(async (req, res) => {
+  // Authorization check for professionals
   if (req.user.role !== "professional" || !req.user.isApproved) {
     res.status(403);
     throw new Error(
@@ -49,14 +53,16 @@ const createPlan = asyncHandler(async (req, res) => {
     planType,
     city,
     productNo,
-    contactName,
-    contactEmail,
-    contactPhone,
     seoTitle,
     seoDescription,
     seoKeywords,
+    seoAltText,
+    taxRate,
+    crossSellProducts,
+    upSellProducts,
   } = req.body;
 
+  // Essential fields validation
   if (
     !name ||
     !price ||
@@ -69,9 +75,7 @@ const createPlan = asyncHandler(async (req, res) => {
     !productNo
   ) {
     res.status(400);
-    throw new Error(
-      "Please fill all required fields, including city and product number"
-    );
+    throw new Error("Please fill all required fields");
   }
 
   const planExists = await ProfessionalPlan.findOne({ productNo });
@@ -85,58 +89,62 @@ const createPlan = asyncHandler(async (req, res) => {
     throw new Error("Main image and at least one plan file are required");
   }
 
-  const countryArray = country.split(",").map((c) => c.trim());
-  const cityArray = city.split(",").map((c) => c.trim());
-  const planFilesArray = req.files.planFile.map((file) => file.path);
+  const getFilePath = (file) => file.location || file.path; // For S3 or local storage
 
+  // Prepare data for the new plan
   const planData = {
     ...req.body,
     user: req.user._id,
-    name,
-    country: countryArray,
-    city: cityArray,
+    country: req.body.country.split(",").map((c) => c.trim()),
+    city: req.body.city.split(",").map((c) => c.trim()),
     isSale: req.body.isSale === "true",
-    mainImage: req.files.mainImage[0].path,
-    planFile: planFilesArray,
+    mainImage: getFilePath(req.files.mainImage[0]),
+    planFile: req.files.planFile.map((file) => getFilePath(file)),
     galleryImages: req.files.galleryImages
-      ? req.files.galleryImages.map((file) => file.path)
+      ? req.files.galleryImages.map((file) => getFilePath(file))
       : [],
     headerImage: req.files.headerImage
-      ? req.files.headerImage[0].path
+      ? getFilePath(req.files.headerImage[0])
       : undefined,
+    seo: {
+      title: seoTitle || name,
+      description: seoDescription || description.substring(0, 160),
+      keywords: seoKeywords || "",
+      altText: seoAltText || name,
+    },
   };
 
-  if (planType === "Construction Products") {
-    planData.contactDetails = {
-      name: contactName,
-      email: contactEmail,
-      phone: contactPhone,
-    };
+  if (taxRate && !isNaN(taxRate)) planData.taxRate = Number(taxRate);
+
+  if (crossSellProducts) {
+    planData.crossSellProducts = crossSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
   }
-
-  planData.seo = {
-    title: seoTitle || name,
-    description: seoDescription || description.substring(0, 160),
-    keywords: seoKeywords || "",
-  };
+  if (upSellProducts) {
+    planData.upSellProducts = upSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }
 
   const plan = new ProfessionalPlan(planData);
   const createdPlan = await plan.save();
   res.status(201).json(createdPlan);
 });
 
-// @desc    Update a plan owned by the professional
+// @desc    Update a plan owned by the professional (updated to be like updateProduct)
 const updatePlan = asyncHandler(async (req, res) => {
   const {
-    country,
-    city,
     productNo,
-    contactName,
-    contactEmail,
-    contactPhone,
     seoTitle,
     seoDescription,
     seoKeywords,
+    seoAltText,
+    taxRate,
+    crossSellProducts,
+    upSellProducts,
   } = req.body;
   const plan = await ProfessionalPlan.findById(req.params.id);
 
@@ -152,40 +160,74 @@ const updatePlan = asyncHandler(async (req, res) => {
   if (productNo && plan.productNo !== productNo) {
     const planExists = await ProfessionalPlan.findOne({ productNo });
     if (planExists) {
-      res
-        .status(400)
-        .throw(
-          new Error("Another plan with this Product Number already exists.")
-        );
+      res.status(400);
+      throw new Error("Another plan with this Product Number already exists.");
     }
   }
 
-  Object.assign(plan, req.body);
+  // Update fields from req.body
+  const fieldsToUpdate = [
+    "name",
+    "description",
+    "price",
+    "salePrice",
+    "category",
+    "plotSize",
+    "plotArea",
+    "rooms",
+    "bathrooms",
+    "kitchen",
+    "floors",
+    "youtubeLink",
+    "productNo",
+  ];
+  fieldsToUpdate.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      plan[field] = req.body[field];
+    }
+  });
 
-  if (req.body.name) plan.name = req.body.name;
-  if (country) plan.country = country.split(",").map((c) => c.trim());
-  if (city) plan.city = city.split(",").map((c) => c.trim());
-
-  if (plan.planType === "Construction Products") {
-    if (!plan.contactDetails) plan.contactDetails = {};
-    if (contactName !== undefined) plan.contactDetails.name = contactName;
-    if (contactEmail !== undefined) plan.contactDetails.email = contactEmail;
-    if (contactPhone !== undefined) plan.contactDetails.phone = contactPhone;
+  if (req.body.isSale !== undefined) {
+    plan.isSale = req.body.isSale === "true";
   }
 
+  // Handle SEO
   if (!plan.seo) plan.seo = {};
   if (seoTitle !== undefined) plan.seo.title = seoTitle;
   if (seoDescription !== undefined) plan.seo.description = seoDescription;
   if (seoKeywords !== undefined) plan.seo.keywords = seoKeywords;
+  if (seoAltText !== undefined) plan.seo.altText = seoAltText;
 
+  if (taxRate !== undefined) plan.taxRate = Number(taxRate);
+
+  // Handle cross/up-sell
+  if (crossSellProducts !== undefined)
+    plan.crossSellProducts = crossSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  if (upSellProducts !== undefined)
+    plan.upSellProducts = upSellProducts
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+  // Handle file updates
   if (req.files) {
-    if (req.files.mainImage) plan.mainImage = req.files.mainImage[0].path;
-    if (req.files.headerImage) plan.headerImage = req.files.headerImage[0].path;
+    const getFilePath = (file) => file.location || file.path;
+    if (req.files.mainImage)
+      plan.mainImage = getFilePath(req.files.mainImage[0]);
+    if (req.files.headerImage)
+      plan.headerImage = getFilePath(req.files.headerImage[0]);
     if (req.files.galleryImages)
-      plan.galleryImages = req.files.galleryImages.map((file) => file.path);
+      plan.galleryImages = req.files.galleryImages.map((file) =>
+        getFilePath(file)
+      );
     if (req.files.planFile && req.files.planFile.length > 0) {
-      const newPlanFiles = req.files.planFile.map((file) => file.path);
-      plan.planFile = [...plan.planFile, ...newPlanFiles];
+      plan.planFile = [
+        ...plan.planFile,
+        ...req.files.planFile.map((file) => getFilePath(file)),
+      ];
     }
   }
 
