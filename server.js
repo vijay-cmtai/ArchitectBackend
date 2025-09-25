@@ -20,6 +20,7 @@ const wishlistRoutes = require("./routes/wishlistRoutes.js");
 const blogRoutes = require("./routes/blogRoutes.js");
 const galleryRoutes = require("./routes/galleryRoutes.js");
 const videoRoutes = require("./routes/videoRoutes.js");
+const packageRoutes = require("./routes/packageRoutes.js");
 
 dotenv.config();
 connectDB();
@@ -49,6 +50,7 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/gallery", galleryRoutes);
 app.use("/api/videos", videoRoutes);
+app.use("/api/packages", packageRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
