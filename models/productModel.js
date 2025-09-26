@@ -67,7 +67,10 @@ const productSchema = mongoose.Schema(
     price: { type: Number, required: true, default: 0 },
     salePrice: { type: Number, default: 0 },
     isSale: { type: Boolean, default: false },
-    category: { type: String, required: true },
+    category: {
+      type: [String],
+      required: true,
+    },
     propertyType: { type: String, enum: ["Residential", "Commercial"] },
     status: {
       type: String,
@@ -91,9 +94,9 @@ const productSchema = mongoose.Schema(
       title: { type: String, trim: true, default: "" },
       description: { type: String, trim: true, default: "" },
       keywords: { type: String, trim: true, default: "" },
-      altText: { type: String, trim: true, default: "" }, // Alt Text for mainImage
+      altText: { type: String, trim: true, default: "" },
     },
-    taxRate: { type: Number, default: 0 }, // e.g., 18 for 18%
+    taxRate: { type: Number, default: 0 },
     crossSellProducts: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
     ],
@@ -103,7 +106,6 @@ const productSchema = mongoose.Schema(
     timestamps: true,
   }
 );
-
 productSchema.pre("save", function (next) {
   if (this.isModified("reviews")) {
     const totalRating = this.reviews.reduce(
