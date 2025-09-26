@@ -27,7 +27,7 @@ const gallerySchema = mongoose.Schema(
       required: false,
     },
     productLink: {
-      type: String, // हम इसे एक स्ट्रिंग के रूप में स्टोर करेंगे (जैसे /product/123)
+      type: String,
       trim: true,
       default: "",
     },
