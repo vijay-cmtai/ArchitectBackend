@@ -1,13 +1,23 @@
 const asyncHandler = require("express-async-handler");
 const Product = require("../../models/productModel.js");
 
-// @desc    Fetch all products
+const normalizeToArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [value];
+};
+
 const getProducts = asyncHandler(async (req, res) => {
   const products = await Product.find({}).populate("user", "name profession");
   res.json(products);
 });
 
-// @desc    Fetch a single product by ID (now populates related products)
 const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id)
     .populate("crossSellProducts", "name mainImage price salePrice isSale slug")
@@ -21,7 +31,6 @@ const getProductById = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Create a new product
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -47,9 +56,6 @@ const createProduct = asyncHandler(async (req, res) => {
     upSellProducts,
   } = req.body;
 
-  console.log("Received files:", req.files);
-  console.log("Request body:", req.body);
-
   if (
     !name ||
     !price ||
@@ -62,24 +68,12 @@ const createProduct = asyncHandler(async (req, res) => {
     !productNo
   ) {
     res.status(400);
-    throw new Error(
-      "Please fill all required fields, including city and product number"
-    );
+    throw new Error("Please fill all required fields.");
   }
 
-  if (!req.files) {
+  if (!req.files || !req.files.mainImage || !req.files.planFile) {
     res.status(400);
-    throw new Error("No files uploaded");
-  }
-
-  if (!req.files.mainImage || !req.files.mainImage[0]) {
-    res.status(400);
-    throw new Error("Main image is required");
-  }
-
-  if (!req.files.planFile || req.files.planFile.length === 0) {
-    res.status(400);
-    throw new Error("At least one plan file is required");
+    throw new Error("Main image and at least one plan file are required.");
   }
 
   const productExists = await Product.findOne({ productNo });
@@ -88,31 +82,12 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error("Product with this Product Number already exists.");
   }
 
-  // Handle country field - check if it's string or array
-  let countryArray;
-  if (typeof country === "string") {
-    countryArray = country.split(",").map((c) => c.trim());
-  } else if (Array.isArray(country)) {
-    countryArray = country;
-  } else {
-    countryArray = [country];
-  }
-
-  // Handle city field - check if it's string or array
-  let cityArray;
-  if (typeof city === "string") {
-    cityArray = city.split(",").map((c) => c.trim());
-  } else if (Array.isArray(city)) {
-    cityArray = city;
-  } else {
-    cityArray = [city];
-  }
-
   const productData = {
     ...req.body,
     user: req.user._id,
-    country: countryArray,
-    city: cityArray,
+    country: normalizeToArray(country),
+    category: normalizeToArray(category),
+    city: Array.isArray(city) ? city[0] : city,
     isSale: isSale === "true" || isSale === true,
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
@@ -121,23 +96,17 @@ const createProduct = asyncHandler(async (req, res) => {
 
   try {
     productData.mainImage = getFilePath(req.files.mainImage[0]);
-    productData.planFile = req.files.planFile.map((file) => getFilePath(file));
-
-    if (req.files.galleryImages && req.files.galleryImages.length > 0) {
-      productData.galleryImages = req.files.galleryImages.map((file) =>
-        getFilePath(file)
-      );
-    } else {
-      productData.galleryImages = [];
-    }
-
+    productData.planFile = req.files.planFile.map(getFilePath);
+    productData.galleryImages = req.files.galleryImages
+      ? req.files.galleryImages.map(getFilePath)
+      : [];
     if (req.files.headerImage && req.files.headerImage[0]) {
       productData.headerImage = getFilePath(req.files.headerImage[0]);
     }
   } catch (error) {
     console.error("Error processing files:", error);
-    res.status(400);
-    throw new Error("Error processing uploaded files");
+    res.status(400).send("Error processing uploaded files");
+    return;
   }
 
   if (planType === "Construction Products") {
@@ -158,36 +127,8 @@ const createProduct = asyncHandler(async (req, res) => {
 
   if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
 
-  // Handle crossSellProducts - check if it's string or array
-  if (crossSellProducts) {
-    if (typeof crossSellProducts === "string") {
-      productData.crossSellProducts = crossSellProducts
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(crossSellProducts)) {
-      productData.crossSellProducts = crossSellProducts.filter(Boolean);
-    }
-  }
-
-  // Handle upSellProducts - check if it's string or array
-  if (upSellProducts) {
-    if (typeof upSellProducts === "string") {
-      productData.upSellProducts = upSellProducts
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(upSellProducts)) {
-      productData.upSellProducts = upSellProducts.filter(Boolean);
-    }
-  }
-
-  console.log("Final product data:", {
-    ...productData,
-    description: productData.description
-      ? productData.description.substring(0, 100) + "..."
-      : "No description",
-  });
+  productData.crossSellProducts = normalizeToArray(crossSellProducts);
+  productData.upSellProducts = normalizeToArray(upSellProducts);
 
   try {
     const product = new Product(productData);
@@ -200,7 +141,6 @@ const createProduct = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Update an existing product
 const updateProduct = asyncHandler(async (req, res) => {
   const {
     country,
@@ -243,97 +183,34 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  // Don't use Object.assign directly - it causes type casting issues with FormData
-  // Update fields individually with proper type handling
-  const fieldsToUpdate = [
-    "name",
-    "description",
-    "price",
-    "salePrice",
-    "category",
-    "plotSize",
-    "plotArea",
-    "rooms",
-    "bathrooms",
-    "kitchen",
-    "floors",
-    "youtubeLink",
-    "productNo",
-  ];
-
-  fieldsToUpdate.forEach((field) => {
-    if (req.body[field] !== undefined) {
-      // Handle numeric fields
-      if (
-        [
-          "price",
-          "salePrice",
-          "plotArea",
-          "rooms",
-          "bathrooms",
-          "kitchen",
-          "floors",
-        ].includes(field)
-      ) {
-        const value = Array.isArray(req.body[field])
-          ? req.body[field][0]
-          : req.body[field];
-        product[field] = value ? Number(value) : undefined;
-      } else {
-        // Handle string fields - take first element if array
-        product[field] = Array.isArray(req.body[field])
-          ? req.body[field][0]
-          : req.body[field];
-      }
+  Object.keys(req.body).forEach((key) => {
+    const specialFields = [
+      "country",
+      "city",
+      "category",
+      "isSale",
+      "crossSellProducts",
+      "upSellProducts",
+      "seoTitle",
+      "seoDescription",
+      "seoKeywords",
+      "seoAltText",
+      "contactName",
+      "contactEmail",
+      "contactPhone",
+    ];
+    if (!specialFields.includes(key)) {
+      product[key] = req.body[key];
     }
   });
 
-  // Handle special fields that might come as arrays from FormData
-  if (req.body.direction !== undefined) {
-    product.direction = Array.isArray(req.body.direction)
-      ? req.body.direction[0]
-      : req.body.direction;
-  }
-
-  if (req.body.planType !== undefined) {
-    product.planType = Array.isArray(req.body.planType)
-      ? req.body.planType[0]
-      : req.body.planType;
-  }
-
-  if (req.body.propertyType !== undefined) {
-    product.propertyType = Array.isArray(req.body.propertyType)
-      ? req.body.propertyType[0]
-      : req.body.propertyType;
-  }
+  if (country !== undefined) product.country = normalizeToArray(country);
+  if (req.body.category !== undefined)
+    product.category = normalizeToArray(req.body.category);
+  if (city !== undefined) product.city = Array.isArray(city) ? city[0] : city;
 
   if (req.body.isSale !== undefined) {
-    const saleValue = Array.isArray(req.body.isSale)
-      ? req.body.isSale[0]
-      : req.body.isSale;
-    product.isSale = saleValue === "true" || saleValue === true;
-  }
-
-  // Handle country field - check if it's string or array
-  if (country !== undefined) {
-    if (typeof country === "string") {
-      product.country = country.split(",").map((c) => c.trim());
-    } else if (Array.isArray(country)) {
-      product.country = country;
-    } else {
-      product.country = [country];
-    }
-  }
-
-  // Handle city field - check if it's string or array
-  if (city !== undefined) {
-    if (typeof city === "string") {
-      product.city = city.split(",").map((c) => c.trim());
-    } else if (Array.isArray(city)) {
-      product.city = city;
-    } else {
-      product.city = [city];
-    }
+    product.isSale = req.body.isSale === "true" || req.body.isSale === true;
   }
 
   if (product.planType === "Construction Products") {
@@ -351,46 +228,21 @@ const updateProduct = asyncHandler(async (req, res) => {
 
   if (taxRate !== undefined) product.taxRate = Number(taxRate);
 
-  // Handle crossSellProducts - check if it's string or array
-  if (crossSellProducts !== undefined) {
-    if (typeof crossSellProducts === "string") {
-      product.crossSellProducts = crossSellProducts
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(crossSellProducts)) {
-      product.crossSellProducts = crossSellProducts.filter(Boolean);
-    }
-  }
-
-  // Handle upSellProducts - check if it's string or array
-  if (upSellProducts !== undefined) {
-    if (typeof upSellProducts === "string") {
-      product.upSellProducts = upSellProducts
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean);
-    } else if (Array.isArray(upSellProducts)) {
-      product.upSellProducts = upSellProducts.filter(Boolean);
-    }
-  }
+  if (crossSellProducts !== undefined)
+    product.crossSellProducts = normalizeToArray(crossSellProducts);
+  if (upSellProducts !== undefined)
+    product.upSellProducts = normalizeToArray(upSellProducts);
 
   if (req.files) {
     const getFilePath = (file) => file.location || file.path;
-
-    if (req.files.mainImage && req.files.mainImage[0]) {
+    if (req.files.mainImage)
       product.mainImage = getFilePath(req.files.mainImage[0]);
-    }
-    if (req.files.headerImage && req.files.headerImage[0]) {
+    if (req.files.headerImage)
       product.headerImage = getFilePath(req.files.headerImage[0]);
-    }
-    if (req.files.galleryImages && req.files.galleryImages.length > 0) {
-      product.galleryImages = req.files.galleryImages.map((file) =>
-        getFilePath(file)
-      );
-    }
-    if (req.files.planFile && req.files.planFile.length > 0) {
-      const newPlanFiles = req.files.planFile.map((file) => getFilePath(file));
+    if (req.files.galleryImages)
+      product.galleryImages = req.files.galleryImages.map(getFilePath);
+    if (req.files.planFile) {
+      const newPlanFiles = req.files.planFile.map(getFilePath);
       product.planFile = [...(product.planFile || []), ...newPlanFiles];
     }
   }
@@ -399,7 +251,6 @@ const updateProduct = asyncHandler(async (req, res) => {
   res.json(updatedProduct);
 });
 
-// @desc    Delete a product
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (product) {
@@ -418,7 +269,6 @@ const deleteProduct = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Create a new review for a product
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
   if (!rating || !comment) {
