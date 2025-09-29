@@ -1,6 +1,6 @@
-// controllers/admin/videoController.js
 const asyncHandler = require("express-async-handler");
 const Video = require("../../models/videoModel");
+const Product = require("../../models/productModel"); 
 
 // Robust function to validate and extract YouTube ID
 const validateAndExtractYouTubeId = (url) => {
@@ -17,25 +17,31 @@ const validateAndExtractYouTubeId = (url) => {
  * @access  Private/Admin
  */
 const addVideoLink = asyncHandler(async (req, res) => {
-  const { title, youtubeLink, topic } = req.body;
+  const { title, youtubeLink, topic, productLink } = req.body;
 
   if (!title || !youtubeLink || !topic) {
     res.status(400);
     throw new Error("Title, YouTube Link, and Topic are required");
   }
 
-  // Validate YouTube URL and get Video ID
   const videoId = validateAndExtractYouTubeId(youtubeLink);
   if (!videoId) {
     res.status(400);
     throw new Error("Invalid YouTube URL format. Please provide a valid link.");
   }
 
-  // Check if a video with this ID already exists
   const videoExists = await Video.findOne({ youtubeVideoId: videoId });
   if (videoExists) {
     res.status(400);
     throw new Error("A video with this YouTube ID already exists.");
+  }
+
+  if (productLink) {
+    const productExists = await Product.findById(productLink);
+    if (!productExists) {
+      res.status(404);
+      throw new Error("The linked product does not exist.");
+    }
   }
 
   const video = await Video.create({
@@ -43,7 +49,8 @@ const addVideoLink = asyncHandler(async (req, res) => {
     title: title.trim(),
     youtubeLink: youtubeLink.trim(),
     topic: topic.trim(),
-    youtubeVideoId: videoId, // We already have the ID
+    youtubeVideoId: videoId,
+    productLink: productLink || null,
   });
 
   res.status(201).json(video);
@@ -56,7 +63,14 @@ const addVideoLink = asyncHandler(async (req, res) => {
  */
 const getVideos = asyncHandler(async (req, res) => {
   const filter = req.query.topic ? { topic: req.query.topic } : {};
-  const videos = await Video.find(filter).sort({ createdAt: -1 });
+
+  const videos = await Video.find(filter)
+    .sort({ createdAt: -1 })
+    .populate(
+      "productLink",
+      "name mainImage price salePrice isSale Name Images"
+    ); 
+
   res.json(videos);
 });
 
