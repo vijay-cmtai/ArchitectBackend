@@ -1,10 +1,7 @@
-// models/videoModel.js
 const mongoose = require("mongoose");
 
-// Helper function to extract YouTube video ID from URL
 const extractYouTubeId = (url) => {
   if (!url) return null;
-  // This regex is robust and covers most YouTube URL formats
   const regExp =
     /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
   const match = url.match(regExp);
@@ -31,13 +28,18 @@ const videoSchema = new mongoose.Schema(
     youtubeVideoId: {
       type: String,
       unique: true,
-      sparse: true, // Allows multiple null values, but unique non-null values
+      sparse: true,
     },
     topic: {
       type: String,
       required: [true, "Please provide a topic"],
       trim: true,
       index: true,
+    },
+    productLink: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product", 
+      required: false, 
     },
   },
   {
@@ -46,16 +48,14 @@ const videoSchema = new mongoose.Schema(
 );
 
 // Pre-save middleware to extract and set youtubeVideoId
-// This will run AFTER the controller has already validated the URL
 videoSchema.pre("save", function (next) {
   if (this.isModified("youtubeLink")) {
     const videoId = extractYouTubeId(this.youtubeLink);
     if (videoId) {
       this.youtubeVideoId = videoId;
     } else {
-      // Although controller validates, this is a fallback
       const err = new Error("Invalid YouTube URL format in model.");
-      next(err);
+      return next(err); 
     }
   }
   next();
