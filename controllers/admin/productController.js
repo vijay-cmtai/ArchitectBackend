@@ -43,6 +43,22 @@ const getProductById = asyncHandler(async (req, res) => {
   }
 });
 
+const getProductBySlug = asyncHandler(async (req, res) => {
+  const slug = req.params.slug;
+  const productId = slug.split("-").pop();
+
+  const product = await Product.findById(productId)
+    .populate("crossSellProducts", "name mainImage price salePrice isSale slug")
+    .populate("upSellProducts", "name mainImage price salePrice isSale slug");
+
+  if (product) {
+    res.json(product);
+  } else {
+    res.status(404);
+    throw new Error("Product not found");
+  }
+});
+
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -145,9 +161,7 @@ const createProduct = asyncHandler(async (req, res) => {
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
-
     await triggerVercelBuild();
-
     res.status(201).json(createdProduct);
   } catch (saveError) {
     console.error("Error saving product:", saveError);
@@ -263,9 +277,7 @@ const updateProduct = asyncHandler(async (req, res) => {
   }
 
   const updatedProduct = await product.save();
-
   await triggerVercelBuild();
-
   res.json(updatedProduct);
 });
 
@@ -280,9 +292,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
       throw new Error("Not authorized to delete this product");
     }
     await product.deleteOne();
-
     await triggerVercelBuild();
-
     res.json({ message: "Product removed successfully" });
   } else {
     res.status(404);
@@ -323,6 +333,7 @@ const createProductReview = asyncHandler(async (req, res) => {
 module.exports = {
   getProducts,
   getProductById,
+  getProductBySlug,
   createProduct,
   updateProduct,
   deleteProduct,
