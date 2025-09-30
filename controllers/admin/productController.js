@@ -1,5 +1,17 @@
 const asyncHandler = require("express-async-handler");
 const Product = require("../../models/productModel.js");
+const axios = require("axios");
+
+const VERCEL_BUILD_HOOK_URL =
+  "https://api.vercel.com/v1/integrations/deploy/prj_BDZT8vFso7lzNhybAA18Uco9YjSo/bj2HCDWHCS";
+
+const triggerVercelBuild = async () => {
+  try {
+    await axios.post(VERCEL_BUILD_HOOK_URL);
+  } catch (error) {
+    console.error("Error triggering Vercel build hook:", error.message);
+  }
+};
 
 const normalizeToArray = (value) => {
   if (!value) return [];
@@ -133,6 +145,9 @@ const createProduct = asyncHandler(async (req, res) => {
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
+
+    await triggerVercelBuild();
+
     res.status(201).json(createdProduct);
   } catch (saveError) {
     console.error("Error saving product:", saveError);
@@ -248,6 +263,9 @@ const updateProduct = asyncHandler(async (req, res) => {
   }
 
   const updatedProduct = await product.save();
+
+  await triggerVercelBuild();
+
   res.json(updatedProduct);
 });
 
@@ -262,6 +280,9 @@ const deleteProduct = asyncHandler(async (req, res) => {
       throw new Error("Not authorized to delete this product");
     }
     await product.deleteOne();
+
+    await triggerVercelBuild();
+
     res.json({ message: "Product removed successfully" });
   } else {
     res.status(404);
