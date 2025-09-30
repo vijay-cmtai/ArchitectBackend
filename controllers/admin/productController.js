@@ -26,8 +26,25 @@ const normalizeToArray = (value) => {
 };
 
 const getProducts = asyncHandler(async (req, res) => {
-  const products = await Product.find({}).populate("user", "name profession");
-  res.json(products);
+  const pageSize = 12; // एक पेज पर कितने प्रोडक्ट्स दिखाने हैं
+  const page = Number(req.query.pageNumber) || 1; // कौनसा पेज दिखाना है (URL से आएगा)
+
+  const keyword = req.query.keyword
+    ? {
+        name: {
+          $regex: req.query.keyword,
+          $options: "i", // केस-इनसेंसिटिव सर्च
+        },
+      }
+    : {};
+
+  const count = await Product.countDocuments({ ...keyword });
+  const products = await Product.find({ ...keyword })
+    .populate("user", "name profession")
+    .limit(pageSize) 
+    .skip(pageSize * (page - 1));
+
+  res.json({ products, page, pages: Math.ceil(count / pageSize) });
 });
 
 const getProductById = asyncHandler(async (req, res) => {
