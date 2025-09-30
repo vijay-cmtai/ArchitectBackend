@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getProducts,
   getProductById,
+  getProductBySlug,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -21,11 +22,10 @@ const handleFileUploads = upload.fields([
   { name: "headerImage", maxCount: 1 },
 ]);
 
-// --- Public Routes ---
 router.route("/").get(getProducts);
+router.route("/slug/:slug").get(getProductBySlug);
 router.route("/:id").get(getProductById);
 
-// --- Protected Routes ---
 router
   .route("/")
   .post(protect, professionalOrAdminProtect, handleFileUploads, createProduct);
