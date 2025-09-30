@@ -26,7 +26,20 @@ dotenv.config();
 connectDB();
 
 const app = express();
-app.use(cors());
+const corsOptions = {
+  origin: [
+    "https://www.houseplanfiles.com",
+    "http://localhost:8080",
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ],
+  methods: "GET,POST,PUT,DELETE",
+  allowedHeaders: "Content-Type,Authorization",
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
