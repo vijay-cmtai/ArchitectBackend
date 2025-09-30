@@ -26,23 +26,26 @@ const normalizeToArray = (value) => {
 };
 
 const getProducts = asyncHandler(async (req, res) => {
-  const pageSize = 12; // एक पेज पर कितने प्रोडक्ट्स दिखाने हैं
-  const page = Number(req.query.pageNumber) || 1; // कौनसा पेज दिखाना है (URL से आएगा)
+  const pageSize = 12; 
+  const page = Number(req.query.pageNumber) || 1; 
 
   const keyword = req.query.keyword
     ? {
         name: {
           $regex: req.query.keyword,
-          $options: "i", // केस-इनसेंसिटिव सर्च
+          $options: "i",
         },
       }
     : {};
 
   const count = await Product.countDocuments({ ...keyword });
+  
+  // Find, sort, paginate, and then populate
   const products = await Product.find({ ...keyword })
-    .populate("user", "name profession")
+    .sort({ _id: -1 }) 
     .limit(pageSize) 
-    .skip(pageSize * (page - 1));
+    .skip(pageSize * (page - 1))
+    .populate("user", "name profession");
 
   res.json({ products, page, pages: Math.ceil(count / pageSize) });
 });
