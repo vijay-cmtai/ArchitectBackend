@@ -1,8 +1,16 @@
 const mongoose = require("mongoose");
-const { customAlphabet } = require("nanoid");
 
-// Generates a unique, URL-friendly, 8-character ID like HPF-A1B2C3D4
-const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
+// Helper function to generate a unique order ID using nanoid
+const generateOrderId = async () => {
+  // Dynamically import the nanoid library which is an ES Module
+  const { customAlphabet } = await import("nanoid");
+
+  // Define the alphabet and length for the ID
+  const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
+
+  // Return the formatted ID
+  return `HPF-${nanoid()}`;
+};
 
 const orderSchema = mongoose.Schema(
   {
@@ -15,8 +23,6 @@ const orderSchema = mongoose.Schema(
     // Public-facing, unique ID for guests to track their order
     orderId: {
       type: String,
-      required: true,
-      default: () => `HPF-${nanoid()}`,
       unique: true,
       index: true,
     },
@@ -70,5 +76,15 @@ const orderSchema = mongoose.Schema(
   }
 );
 
+// Mongoose pre-save hook to generate the unique orderId before saving a new document
+orderSchema.pre("save", async function (next) {
+  // Check if the document is new and if the orderId has not been set yet
+  if (this.isNew && !this.orderId) {
+    this.orderId = await generateOrderId();
+  }
+  next(); // Continue with the save operation
+});
+
 const Order = mongoose.model("Order", orderSchema);
+
 module.exports = Order;
