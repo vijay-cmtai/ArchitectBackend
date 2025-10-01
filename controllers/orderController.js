@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const Order = require("../models/orderModel.js");
-const Product = require("../models/productModel.js"); // Make sure this path is correct
+const Product = require("../models/productModel.js");
 const mongoose = require("mongoose");
 
 // --- HELPER FUNCTIONS ---
@@ -12,7 +12,6 @@ const mongoose = require("mongoose");
 const getDownloadableFilesForOrder = async (orderItems) => {
   const files = [];
   for (const item of orderItems) {
-    // Assuming 'Product' is your main model for plans
     const product = await Product.findById(item.productId).select(
       "name planFile"
     );
@@ -174,33 +173,69 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
 });
 
 const createPhonePePayment = asyncHandler(async (req, res) => {
+  // Environment check
+  console.log("=== PhonePe Payment Creation Started ===");
+  console.log("Environment Config:", {
+    frontendUrl: process.env.FRONTEND_URL,
+    backendUrl: process.env.BACKEND_URL,
+    merchantId: process.env.PHONEPE_MERCHANT_ID,
+    apiUrl: process.env.PHONEPE_API_URL,
+    saltIndex: process.env.PHONEPE_SALT_INDEX,
+    hasSaltKey: !!process.env.PHONEPE_SALT_KEY,
+  });
+
   const order = await Order.findById(req.params.id);
   if (!order) {
     res.status(404);
     throw new Error("Order not found");
   }
+
+  console.log("Order Details:", {
+    orderId: order._id,
+    totalPrice: order.totalPrice,
+    phone: order.shippingAddress.phone,
+    email: order.shippingAddress.email,
+  });
+
+  // Generate unique transaction ID
   const merchantTransactionId = `M-${order._id}-${Date.now()}`;
   order.merchantTransactionId = merchantTransactionId;
   await order.save();
 
   const amountInPaise = Math.round(order.totalPrice * 100);
+
+  // Ensure phone number is valid (10 digits)
+  let phoneNumber = order.shippingAddress.phone || "9999999999";
+  phoneNumber = phoneNumber.replace(/\D/g, ""); // Remove non-digits
+  if (phoneNumber.length !== 10) {
+    phoneNumber = "9999999999"; // Fallback
+  }
+
   const payload = {
     merchantId: process.env.PHONEPE_MERCHANT_ID,
     merchantTransactionId,
-    merchantUserId: req.user ? req.user._id.toString() : "GUEST",
+    merchantUserId: req.user ? req.user._id.toString() : `GUEST-${order._id}`,
     amount: amountInPaise,
     redirectUrl: `${process.env.FRONTEND_URL}/order-success/${order.orderId}`,
     redirectMode: "REDIRECT",
     callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-callback`,
-    mobileNumber: order.shippingAddress.phone,
-    paymentInstrument: { type: "PAY_PAGE" },
+    mobileNumber: phoneNumber,
+    paymentInstrument: {
+      type: "PAY_PAGE",
+    },
   };
+  
+  console.log("PhonePe Payload:", JSON.stringify(payload, null, 2));
+
   const payloadString = JSON.stringify(payload);
   const base64Payload = Buffer.from(payloadString).toString("base64");
+
   const stringToHash =
     base64Payload + "/pg/v1/pay" + process.env.PHONEPE_SALT_KEY;
   const sha256 = crypto.createHash("sha256").update(stringToHash).digest("hex");
   const xVerify = sha256 + "###" + process.env.PHONEPE_SALT_INDEX;
+
+  console.log("X-VERIFY Header:", xVerify);
 
   const options = {
     method: "post",
@@ -210,22 +245,87 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       "Content-Type": "application/json",
       "X-VERIFY": xVerify,
     },
-    data: { request: base64Payload },
+    data: {
+      request: base64Payload,
+    },
   };
+
   try {
     const response = await axios.request(options);
-    const redirectUrl = response.data.data.instrumentResponse.redirectInfo.url;
-    res.json({ redirectUrl });
-  } catch (error) {
-    console.error(
-      "PhonePe Error:",
-      error.response ? error.response.data : error.message
+
+    console.log("PhonePe API Response Status:", response.status);
+    console.log(
+      "PhonePe API Response:",
+      JSON.stringify(response.data, null, 2)
     );
-    res.status(500).json({ message: "Failed to create PhonePe payment" });
+
+    // Check if response is successful
+    if (response.data && response.data.success) {
+      const redirectUrl =
+        response.data.data?.instrumentResponse?.redirectInfo?.url;
+
+      if (redirectUrl) {
+        console.log("✓ Payment URL generated successfully:", redirectUrl);
+        res.json({ redirectUrl });
+      } else {
+        console.error("✗ No redirect URL in response");
+        res.status(500).json({
+          message: "PhonePe did not return a redirect URL",
+          responseData: response.data,
+        });
+      }
+    } else {
+      console.error(
+        "✗ PhonePe API returned unsuccessful response:",
+        response.data
+      );
+      res.status(500).json({
+        message: response.data.message || "PhonePe payment creation failed",
+        code: response.data.code,
+        responseData: response.data,
+      });
+    }
+  } catch (error) {
+    console.error("=== PhonePe API Error ===");
+    console.error("Error Message:", error.message);
+
+    if (error.response) {
+      console.error("Response Status:", error.response.status);
+      console.error(
+        "Response Data:",
+        JSON.stringify(error.response.data, null, 2)
+      );
+      console.error("Response Headers:", error.response.headers);
+
+      res.status(500).json({
+        message: "Failed to create PhonePe payment",
+        error: error.response.data,
+        statusCode: error.response.status,
+      });
+    } else if (error.request) {
+      console.error("No response received from PhonePe");
+      console.error("Request:", error.request);
+
+      res.status(500).json({
+        message: "No response from PhonePe server",
+        error: "Network error or PhonePe server not reachable",
+      });
+    } else {
+      console.error("Error setting up request:", error.message);
+
+      res.status(500).json({
+        message: "Failed to create PhonePe payment",
+        error: error.message,
+      });
+    }
   }
 });
 
 const handlePhonePeCallback = asyncHandler(async (req, res) => {
+  console.log("=== PhonePe Callback Received ===");
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
+
   const payload = req.body;
   const base64Response = payload.response;
 
@@ -249,6 +349,9 @@ const handlePhonePeCallback = asyncHandler(async (req, res) => {
   const decodedResponse = JSON.parse(
     Buffer.from(base64Response, "base64").toString()
   );
+
+  console.log("Decoded Response:", JSON.stringify(decodedResponse, null, 2));
+
   const { merchantTransactionId, code } = decodedResponse.data;
   const order = await Order.findOne({ merchantTransactionId });
 
@@ -256,7 +359,9 @@ const handlePhonePeCallback = asyncHandler(async (req, res) => {
     console.error("Order not found for transaction:", merchantTransactionId);
     return res.status(404).send({ message: "Order not found" });
   }
+
   if (order.isPaid) {
+    console.log("Order already processed:", order.orderId);
     return res.status(200).send({ message: "Order already processed" });
   }
 
@@ -268,10 +373,13 @@ const handlePhonePeCallback = asyncHandler(async (req, res) => {
       email_address: order.shippingAddress.email,
     };
     await updateOrderAfterPayment(order);
-    console.log(`Order ${order.orderId} marked as paid successfully.`);
+    console.log(`✓ Order ${order.orderId} marked as paid successfully.`);
   } else {
-    console.log(`Payment for order ${order.orderId} failed with code: ${code}`);
+    console.log(
+      `✗ Payment for order ${order.orderId} failed with code: ${code}`
+    );
   }
+
   res.status(200).send({ message: "Callback received successfully" });
 });
 
