@@ -1,8 +1,5 @@
-// models/professionalPlanModel.js
-
 const mongoose = require("mongoose");
 
-// Review schema (consistent with productModel)
 const reviewSchema = mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -16,17 +13,13 @@ const reviewSchema = mongoose.Schema(
 const professionalPlanSchema = mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "User" },
-    name: {
-      type: String,
-      required: [true, "Plan name is required"],
-      trim: true,
-    },
-    description: { type: String, required: [true, "Description is required"] },
-    productNo: {
-      type: String,
-      required: [true, "Product Number is required"],
-      unique: true,
-    },
+    name: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    productNo: { type: String, required: true, unique: true },
+    price: { type: Number, required: true, default: 0 },
+    salePrice: { type: Number, default: 0 },
+    category: { type: [String], required: true },
+    youtubeLink: { type: String, trim: true },
     plotSize: { type: String, required: true },
     plotArea: { type: Number, required: true },
     rooms: { type: Number, required: true, default: 0 },
@@ -46,7 +39,7 @@ const professionalPlanSchema = mongoose.Schema(
         "South-West",
       ],
     },
-    city: { type: [String], required: true },
+    city: { type: String, required: true },
     country: { type: [String], required: true },
     planType: {
       type: String,
@@ -58,43 +51,69 @@ const professionalPlanSchema = mongoose.Schema(
         "Construction Products",
       ],
     },
-    price: { type: Number, required: true, default: 0 },
-    salePrice: { type: Number, default: 0 },
-    isSale: { type: Boolean, default: false },
-    category: { type: String, required: true },
-    propertyType: { type: String, enum: ["Residential", "Commercial"] },
-    status: {
+    propertyType: {
       type: String,
-      enum: ["Published", "Pending Review", "Draft", "Approved"],
-      default: "Pending Review",
+      required: true,
+      enum: ["Residential", "Commercial"],
     },
+    isSale: { type: Boolean, default: false },
+    taxRate: { type: Number, default: 0 },
     mainImage: { type: String, required: true },
     galleryImages: [{ type: String }],
     planFile: { type: [String], required: true },
     headerImage: { type: String },
-    rating: { type: Number, default: 0 },
-    numReviews: { type: Number, default: 0 },
-    youtubeLink: { type: String, trim: true },
-    reviews: [reviewSchema],
+    seo: {
+      title: { type: String, trim: true, default: "" },
+      description: { type: String, trim: true, default: "" },
+      keywords: { type: String, trim: true, default: "" },
+      altText: { type: String, trim: true, default: "" },
+    },
+    crossSellProducts: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    ],
+    upSellProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
     contactDetails: {
       name: { type: String, trim: true },
       email: { type: String, trim: true },
       phone: { type: String, trim: true },
     },
-    // ADDED: SEO fields to match Product model
-    seo: {
-      title: { type: String, trim: true, default: "" },
-      description: { type: String, trim: true, default: "" },
-      keywords: { type: String, trim: true, default: "" },
-      altText: { type: String, trim: true, default: "" }, // Alt Text for mainImage
+    rating: { type: Number, default: 0 },
+    numReviews: { type: Number, default: 0 },
+    reviews: [reviewSchema],
+    status: {
+      type: String,
+      enum: ["Published", "Pending Review", "Draft", "Approved"],
+      default: "Pending Review",
     },
-    // ADDED: Tax Rate
-    taxRate: { type: Number, default: 0 },
-    // ADDED: Cross-sell and Up-sell fields
-    crossSellProducts: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
-    ],
-    upSellProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
+    // Legacy Fields from Product Model
+    ID: { type: Number, index: true },
+    Type: { type: String },
+    SKU: { type: String },
+    Published: { type: Number },
+    "Is featured?": { type: Number },
+    "Visibility in catalog": { type: String },
+    "Short description": { type: String },
+    "Tax status": { type: String },
+    "Tax class": { type: Number },
+    "In stock?": { type: Number },
+    Stock: { type: Number, default: null },
+    Tags: { type: String },
+    Upsells: { type: String },
+    "Cross-sells": { type: String },
+    Position: { type: Number },
+    "Download 1 URL": { type: String },
+    "Download 2 URL": { type: String },
+    "Download 3 URL": { type: String },
+    "Attribute 1 name": { type: String },
+    "Attribute 1 value(s)": { type: String },
+    "Attribute 2 name": { type: String },
+    "Attribute 2 value(s)": { type: String },
+    "Attribute 3 name": { type: String },
+    "Attribute 3 value(s)": { type: String },
+    "Attribute 4 name": { type: String },
+    "Attribute 4 value(s)": { type: String },
+    "Attribute 5 name": { type: String },
+    "Attribute 5 value(s)": { type: String },
   },
   {
     timestamps: true,
