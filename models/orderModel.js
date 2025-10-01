@@ -1,32 +1,23 @@
 const mongoose = require("mongoose");
 
-// Helper function to generate a unique order ID using nanoid
 const generateOrderId = async () => {
-  // Dynamically import the nanoid library which is an ES Module
   const { customAlphabet } = await import("nanoid");
-
-  // Define the alphabet and length for the ID
   const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 8);
-
-  // Return the formatted ID
   return `HPF-${nanoid()}`;
 };
 
 const orderSchema = mongoose.Schema(
   {
-    // User is now OPTIONAL for guest checkouts
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: false,
     },
-    // Public-facing, unique ID for guests to track their order
     orderId: {
       type: String,
       unique: true,
       index: true,
     },
-    // Stores the URLs of files the user can download after payment
     downloadableFiles: [
       {
         productName: { type: String, required: true },
@@ -45,6 +36,10 @@ const orderSchema = mongoose.Schema(
         price: { type: Number, required: true },
         image: { type: String },
         size: { type: String },
+        professional: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
       },
     ],
     shippingAddress: {
@@ -69,20 +64,18 @@ const orderSchema = mongoose.Schema(
     totalPrice: { type: Number, required: true, default: 0.0 },
     isPaid: { type: Boolean, required: true, default: false },
     paidAt: { type: Date },
-    merchantTransactionId: { type: String }, // For PhonePe
+    merchantTransactionId: { type: String },
   },
   {
     timestamps: true,
   }
 );
 
-// Mongoose pre-save hook to generate the unique orderId before saving a new document
 orderSchema.pre("save", async function (next) {
-  // Check if the document is new and if the orderId has not been set yet
   if (this.isNew && !this.orderId) {
     this.orderId = await generateOrderId();
   }
-  next(); // Continue with the save operation
+  next();
 });
 
 const Order = mongoose.model("Order", orderSchema);
