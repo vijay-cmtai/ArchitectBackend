@@ -27,9 +27,18 @@ const validateRoleFields = (role, body) => {
       return { name, isApproved: true, status: "Approved" };
 
     case "professional":
-      if (!name || !profession)
-        throw new Error("Full Name and Profession are required");
-      return { name, profession, isApproved: false, status: "Pending" };
+      if (!name || !profession || !city || !experience)
+        throw new Error(
+          "Full Name, Profession, City, and Experience are required"
+        );
+      return {
+        name,
+        profession,
+        city,
+        experience,
+        isApproved: false,
+        status: "Pending",
+      };
 
     case "seller":
       if (!businessName || !address || !city || !materialType)
@@ -104,7 +113,6 @@ const registerUser = asyncHandler(async (req, res) => {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
-    // Handle all potential file uploads from the middleware
     if (req.files) {
       if (req.files.photo) {
         userData.photoUrl = req.files.photo[0].path;
@@ -132,6 +140,7 @@ const registerUser = asyncHandler(async (req, res) => {
       shopImageUrl: user.shopImageUrl,
       profession: user.profession,
       experience: user.experience,
+      city: user.city,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -195,6 +204,7 @@ const loginUser = asyncHandler(async (req, res) => {
       businessName: user.businessName,
       companyName: user.companyName,
       experience: user.experience,
+      city: user.city,
       photoUrl: user.photoUrl,
       token: generateToken(user._id),
     });
@@ -280,7 +290,6 @@ const updateUser = asyncHandler(async (req, res) => {
       user.isApproved = false;
   }
 
-  // Handle file updates during user profile edits
   if (req.files) {
     if (req.files.photo) user.photoUrl = req.files.photo[0].path;
     if (req.files.businessCertification)
@@ -290,6 +299,8 @@ const updateUser = asyncHandler(async (req, res) => {
 
   if (user.role === "professional") {
     user.profession = req.body.profession || user.profession;
+    user.city = req.body.city || user.city;
+    user.experience = req.body.experience || user.experience;
   } else if (user.role === "seller") {
     user.businessName = req.body.businessName || user.businessName;
     user.address = req.body.address || user.address;
