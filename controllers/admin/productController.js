@@ -26,24 +26,77 @@ const normalizeToArray = (value) => {
 };
 
 const getProducts = asyncHandler(async (req, res) => {
-  const pageSize = 12; 
-  const page = Number(req.query.pageNumber) || 1; 
+  const pageSize = parseInt(req.query.limit) || 12;
+  const page = parseInt(req.query.pageNumber) || 1;
 
-  const keyword = req.query.keyword
-    ? {
-        name: {
-          $regex: req.query.keyword,
-          $options: "i",
-        },
+  const query = {};
+
+  const {
+    keyword,
+    country,
+    category,
+    plotSize,
+    plotArea,
+    direction,
+    floors,
+    propertyType,
+    budget,
+  } = req.query;
+
+  if (keyword) {
+    query.name = { $regex: keyword, $options: "i" };
+  }
+
+  if (country) {
+    query.country = country;
+  }
+
+  if (category && category !== "all") {
+    query.category = category;
+  }
+
+  if (plotSize && plotSize !== "all") {
+    query.plotSize = plotSize;
+  }
+
+  if (direction && direction !== "all") {
+    query.direction = direction;
+  }
+
+  if (floors && floors !== "all") {
+    if (floors === "3") {
+      query.floors = { $gte: 3 };
+    } else {
+      query.floors = Number(floors);
+    }
+  }
+
+  if (propertyType && propertyType !== "all") {
+    query.propertyType = propertyType;
+  }
+
+  if (budget) {
+    const [min, max] = budget.split("-").map(Number);
+    if (!isNaN(min) && !isNaN(max)) {
+      query.price = { $gte: min, $lte: max };
+    }
+  }
+
+  if (plotArea && plotArea !== "all") {
+    if (plotArea === "2000+") {
+      query.plotArea = { $gte: 2000 };
+    } else {
+      const [minArea, maxArea] = plotArea.split("-").map(Number);
+      if (!isNaN(minArea) && !isNaN(maxArea)) {
+        query.plotArea = { $gte: minArea, $lte: maxArea };
       }
-    : {};
+    }
+  }
 
-  const count = await Product.countDocuments({ ...keyword });
-  
-  // Find, sort, paginate, and then populate
-  const products = await Product.find({ ...keyword })
-    .sort({ _id: -1 }) 
-    .limit(pageSize) 
+  const count = await Product.countDocuments(query);
+  const products = await Product.find(query)
+    .sort({ _id: -1 })
+    .limit(pageSize)
     .skip(pageSize * (page - 1))
     .populate("user", "name profession");
 
