@@ -32,7 +32,7 @@ const getProducts = asyncHandler(async (req, res) => {
   const query = {};
 
   const {
-    keyword,
+    searchTerm,
     country,
     category,
     plotSize,
@@ -41,27 +41,34 @@ const getProducts = asyncHandler(async (req, res) => {
     floors,
     propertyType,
     budget,
+    sortBy,
   } = req.query;
 
-  if (keyword) {
-    query.name = { $regex: keyword, $options: "i" };
+  // Search filter
+  if (searchTerm) {
+    const searchRegex = { $regex: searchTerm, $options: "i" };
+    // Comprehensive search across multiple relevant fields, including legacy ones
+    query.$or = [
+      { name: searchRegex },
+      { Name: searchRegex },
+      { description: searchRegex },
+      { Description: searchRegex },
+      { "Short description": searchRegex },
+      { category: searchRegex },
+      { Categories: searchRegex },
+      { city: searchRegex },
+      { productNo: searchRegex },
+      { SKU: searchRegex },
+      { planType: searchRegex },
+    ];
   }
 
-  if (country) {
-    query.country = country;
-  }
-
-  if (category && category !== "all") {
-    query.category = category;
-  }
-
-  if (plotSize && plotSize !== "all") {
-    query.plotSize = plotSize;
-  }
-
-  if (direction && direction !== "all") {
-    query.direction = direction;
-  }
+  // Other filters
+  if (country) query.country = country;
+  if (category && category !== "all") query.category = category;
+  if (plotSize && plotSize !== "all") query.plotSize = plotSize;
+  if (direction && direction !== "all") query.direction = direction;
+  if (propertyType && propertyType !== "all") query.propertyType = propertyType;
 
   if (floors && floors !== "all") {
     if (floors === "3") {
@@ -69,10 +76,6 @@ const getProducts = asyncHandler(async (req, res) => {
     } else {
       query.floors = Number(floors);
     }
-  }
-
-  if (propertyType && propertyType !== "all") {
-    query.propertyType = propertyType;
   }
 
   if (budget) {
@@ -93,14 +96,22 @@ const getProducts = asyncHandler(async (req, res) => {
     }
   }
 
+  // Sorting options
+  let sortOptions = { _id: -1 }; // Default: newest
+  if (sortBy === "price-low") {
+    sortOptions = { price: 1 };
+  } else if (sortBy === "price-high") {
+    sortOptions = { price: -1 };
+  }
+
   const count = await Product.countDocuments(query);
   const products = await Product.find(query)
-    .sort({ _id: -1 })
+    .sort(sortOptions)
     .limit(pageSize)
     .skip(pageSize * (page - 1))
     .populate("user", "name profession");
 
-  res.json({ products, page, pages: Math.ceil(count / pageSize) });
+  res.json({ products, page, pages: Math.ceil(count / pageSize), count });
 });
 
 const getProductById = asyncHandler(async (req, res) => {
@@ -288,8 +299,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  // --- START: FIX FOR VALIDATION ERRORS ---
-  // Sanitize (clean) incoming data before processing it.
   Object.keys(req.body).forEach((key) => {
     const numericFields = [
       "kitchen",
@@ -302,33 +311,25 @@ const updateProduct = asyncHandler(async (req, res) => {
       "taxRate",
     ];
 
-    // For numeric fields, if the value is empty or invalid, set it to undefined so Mongoose ignores it.
     if (numericFields.includes(key)) {
       const value = req.body[key];
-      // If value is not an empty string, try to convert it. Otherwise, it's undefined.
       const numValue =
         value !== "" && value !== null ? Number(value) : undefined;
       req.body[key] = isNaN(numValue) ? undefined : numValue;
     }
 
-    // For direction, if it's an empty string, set it to undefined to avoid enum error.
     if (key === "direction" && req.body[key] === "") {
       req.body[key] = undefined;
     }
   });
-  // --- END: FIX ---
 
-  // Update standard fields and their legacy counterparts from JSON/CSV
   Object.keys(req.body).forEach((key) => {
     const value = req.body[key];
 
-    // Skip updating if the value is undefined
     if (value === undefined) return;
 
-    // Standard field assignment
     product[key] = value;
 
-    // Mapping to legacy (JSON/CSV) fields
     switch (key) {
       case "name":
         product.Name = value;
@@ -364,7 +365,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   });
 
-  // Handle fields that need special processing (like arrays, booleans)
   if (country !== undefined) {
     product.country = normalizeToArray(country);
   }
