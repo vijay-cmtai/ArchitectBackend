@@ -29,12 +29,12 @@ const getProducts = asyncHandler(async (req, res) => {
   const pageSize = parseInt(req.query.limit) || 12;
   const page = parseInt(req.query.pageNumber) || 1;
 
-  const query = {};
+  let query = {};
 
   const {
     searchTerm,
     country,
-    category,
+    category, // This can still be used for sub-filtering
     plotSize,
     plotArea,
     direction,
@@ -42,67 +42,105 @@ const getProducts = asyncHandler(async (req, res) => {
     propertyType,
     budget,
     sortBy,
+    planCategory, // YEH NAYA PARAMETER HAI JO PAGE TYPE BATAYEGA
   } = req.query;
 
-  // Search filter
+  // --- START: Naya Logic jo 'planCategory' ko handle karega ---
+  if (planCategory) {
+    let categoryQuery;
+
+    if (planCategory.toLowerCase() === 'floor-plans') {
+      // Logic for "Floor Plans"
+      categoryQuery = {
+        $or: [
+          { planType: { $regex: /^Floor Plans$/i } },
+          { category: { $regex: /^Floor Plans$/i } },
+          { Categories: { $regex: /floor-plans/i } }
+        ]
+      };
+    } else if (planCategory.toLowerCase() === 'elevations') {
+      // Logic for "Floor Plans + 3D Elevation"
+      categoryQuery = {
+        $or: [
+          { planType: { $regex: /Floor Plans.*\+.*3 ?D.*Elevation/i } },
+          { category: { $regex: /Floor Plans.*\+.*Elevation/i } },
+          { Categories: { $regex: /Floor Plans.*\+.*Elevation/i } }
+        ]
+      };
+    } else if (planCategory.toLowerCase() === 'interior-designs') {
+      // Logic for "Interior Designs"
+      categoryQuery = {
+        $or: [
+          { planType: { $regex: /Interior Designs/i } },
+          { category: { $regex: /Interior Designs/i } },
+          { Categories: { $regex: /INTERIOR DESIGNS/i } }
+        ]
+      };
+    }
+    
+    if (categoryQuery) {
+        // `$and` ensures that this base category filter is always applied
+        query = { $and: [categoryQuery] };
+    }
+  }
+
+  // --- Baaki ke filters ko `$and` ke andar daal denge ---
+  const otherFilters = {};
+
   if (searchTerm) {
     const searchRegex = { $regex: searchTerm, $options: "i" };
-    // Comprehensive search across multiple relevant fields, including legacy ones
-    query.$or = [
-      { name: searchRegex },
-      { Name: searchRegex },
-      { description: searchRegex },
-      { Description: searchRegex },
-      { "Short description": searchRegex },
-      { category: searchRegex },
-      { Categories: searchRegex },
-      { city: searchRegex },
-      { productNo: searchRegex },
-      { SKU: searchRegex },
-      { planType: searchRegex },
+    otherFilters.$or = [
+      { name: searchRegex }, { Name: searchRegex },
+      { description: searchRegex }, { Description: searchRegex },
+      { city: searchRegex }, { productNo: searchRegex }, { SKU: searchRegex },
     ];
   }
 
-  // Other filters
-  if (country) query.country = country;
-  if (category && category !== "all") query.category = category;
-  if (plotSize && plotSize !== "all") query.plotSize = plotSize;
-  if (direction && direction !== "all") query.direction = direction;
-  if (propertyType && propertyType !== "all") query.propertyType = propertyType;
+  if (country) otherFilters.country = country;
+  if (category && category !== "all") otherFilters.category = category;
+  if (plotSize && plotSize !== "all") otherFilters.plotSize = plotSize;
+  if (direction && direction !== "all") otherFilters.direction = direction;
+  if (propertyType && propertyType !== "all") otherFilters.propertyType = propertyType;
 
   if (floors && floors !== "all") {
     if (floors === "3") {
-      query.floors = { $gte: 3 };
+      otherFilters.floors = { $gte: 3 };
     } else {
-      query.floors = Number(floors);
+      otherFilters.floors = Number(floors);
     }
   }
 
   if (budget) {
     const [min, max] = budget.split("-").map(Number);
     if (!isNaN(min) && !isNaN(max)) {
-      query.price = { $gte: min, $lte: max };
+      otherFilters.price = { $gte: min, $lte: max };
     }
   }
 
   if (plotArea && plotArea !== "all") {
     if (plotArea === "2000+") {
-      query.plotArea = { $gte: 2000 };
+      otherFilters.plotArea = { $gte: 2000 };
     } else {
       const [minArea, maxArea] = plotArea.split("-").map(Number);
       if (!isNaN(minArea) && !isNaN(maxArea)) {
-        query.plotArea = { $gte: minArea, $lte: maxArea };
+        otherFilters.plotArea = { $gte: minArea, $lte: maxArea };
       }
     }
   }
-
-  // Sorting options
-  let sortOptions = { _id: -1 }; // Default: newest
-  if (sortBy === "price-low") {
-    sortOptions = { price: 1 };
-  } else if (sortBy === "price-high") {
-    sortOptions = { price: -1 };
+  
+  // Combine the planCategory filter with other filters
+  if (Object.keys(otherFilters).length > 0) {
+      if(query.$and) {
+          query.$and.push(otherFilters);
+      } else {
+          query = {...query, ...otherFilters};
+      }
   }
+
+  // Sorting
+  let sortOptions = { _id: -1 };
+  if (sortBy === "price-low") sortOptions = { price: 1 };
+  if (sortBy === "price-high") sortOptions = { price: -1 };
 
   const count = await Product.countDocuments(query);
   const products = await Product.find(query)
