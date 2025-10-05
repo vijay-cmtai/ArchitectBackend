@@ -63,8 +63,8 @@ const getProducts = asyncHandler(async (req, res) => {
       categoryQuery = {
         $or: [
           { planType: { $regex: /Floor Plans.*\+.*3 ?D.*Elevation/i } },
-          { category: { $regex: /Floor Plans.*\+.*Elevation/i } },
-          { Categories: { $regex: /Floor Plans.*\+.*Elevation/i } }
+          { category: { $regex: /FLOOR PLAN.*\+.*ELEVATION/i } },
+          { Categories: { $regex: /FLOOR PLAN.*\+.*ELEVATION/i } }
         ]
       };
     } else if (planCategory.toLowerCase() === 'interior-designs') {
@@ -225,13 +225,11 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("Main image and at least one plan file are required.");
   }
-
   const productExists = await Product.findOne({ productNo });
   if (productExists) {
     res.status(400);
     throw new Error("Product with this Product Number already exists.");
   }
-
   const productData = {
     ...req.body,
     user: req.user._id,
@@ -241,9 +239,7 @@ const createProduct = asyncHandler(async (req, res) => {
     isSale: isSale === "true" || isSale === true,
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
-
   const getFilePath = (file) => file.location || file.path;
-
   try {
     productData.mainImage = getFilePath(req.files.mainImage[0]);
     productData.planFile = req.files.planFile.map(getFilePath);
@@ -258,7 +254,6 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(400).send("Error processing uploaded files");
     return;
   }
-
   if (planType === "Construction Products") {
     productData.contactDetails = {
       name: contactName || "",
@@ -266,7 +261,6 @@ const createProduct = asyncHandler(async (req, res) => {
       phone: contactPhone || "",
     };
   }
-
   productData.seo = {
     title: seoTitle || name,
     description:
@@ -274,12 +268,9 @@ const createProduct = asyncHandler(async (req, res) => {
     keywords: seoKeywords || "",
     altText: seoAltText || name,
   };
-
   if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
-
   productData.crossSellProducts = normalizeToArray(crossSellProducts);
   productData.upSellProducts = normalizeToArray(upSellProducts);
-
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
@@ -291,7 +282,6 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error(`Failed to save product: ${saveError.message}`);
   }
 });
-
 const updateProduct = asyncHandler(async (req, res) => {
   const {
     country,
@@ -308,14 +298,11 @@ const updateProduct = asyncHandler(async (req, res) => {
     crossSellProducts,
     upSellProducts,
   } = req.body;
-
   const product = await Product.findById(req.params.id);
-
   if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
-
   if (
     req.user.role !== "admin" &&
     (!product.user || product.user.toString() !== req.user._id.toString())
@@ -323,7 +310,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     res.status(401);
     throw new Error("Not authorized to update this product");
   }
-
   if (productNo && product.productNo !== productNo) {
     const productExists = await Product.findOne({ productNo });
     if (
