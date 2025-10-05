@@ -22,6 +22,8 @@ const galleryRoutes = require("./routes/galleryRoutes.js");
 const videoRoutes = require("./routes/videoRoutes.js");
 const packageRoutes = require("./routes/packageRoutes.js");
 const professionalOrderRoutes = require("./routes/professionalOrderRoutes.js");
+const sellerProductRoutes = require("./routes/sellerProductRoutes");
+const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
 
 dotenv.config();
 connectDB();
@@ -35,7 +37,6 @@ app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
-
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/professional-plans", professionalPlanRoutes);
@@ -52,8 +53,9 @@ app.use("/api/blogs", blogRoutes);
 app.use("/api/gallery", galleryRoutes);
 app.use("/api/videos", videoRoutes);
 app.use("/api/packages", packageRoutes);
-app.use("/api/professional-orders", professionalOrderRoutes); // Nayi line add karein
-
+app.use("/api/professional-orders", professionalOrderRoutes);
+app.use("/api/seller/products", sellerProductRoutes);
+app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
