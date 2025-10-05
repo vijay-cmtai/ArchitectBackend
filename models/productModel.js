@@ -1,3 +1,5 @@
+// File: models/product.model.js
+
 const mongoose = require("mongoose");
 
 const reviewSchema = mongoose.Schema(
@@ -12,17 +14,19 @@ const reviewSchema = mongoose.Schema(
 
 const productSchema = mongoose.Schema(
   {
+    // --- SIRF YE 3 FIELDS REQUIRED HAIN ---
     name: { type: String, required: true, trim: true, alias: "Name" },
-    description: { type: String, required: true },
     productNo: { type: String, required: true, unique: true },
     price: { type: Number, required: true, default: 0, alias: "Regular price" },
-    salePrice: { type: Number, default: 0, alias: "Sale price" },
-    category: { type: [String], required: true, alias: "Categories" }, 
 
+    // --- BAAKI SABHI FIELDS OPTIONAL HAIN ---
+    description: { type: String },
+    salePrice: { type: Number, default: 0, alias: "Sale price" },
+    category: { type: [String], alias: "Categories" },
     youtubeLink: { type: String, trim: true },
-    plotSize: { type: String, required: true },
-    plotArea: { type: Number, required: true },
-    rooms: { type: Number, required: true, default: 0 },
+    plotSize: { type: String },
+    plotArea: { type: Number },
+    rooms: { type: Number, default: 0 },
     bathrooms: { type: Number, default: 0 },
     kitchen: { type: Number, default: 0 },
     floors: { type: Number, default: 1 },
@@ -39,11 +43,10 @@ const productSchema = mongoose.Schema(
         "South-West",
       ],
     },
-    city: { type: String, required: true },
-    country: { type: [String], required: true },
+    city: { type: String },
+    country: { type: [String] },
     planType: {
       type: String,
-      required: true,
       enum: [
         "Floor Plans",
         "Floor Plan + 3D Elevations",
@@ -53,14 +56,13 @@ const productSchema = mongoose.Schema(
     },
     propertyType: {
       type: String,
-      required: true,
       enum: ["Residential", "Commercial"],
     },
     isSale: { type: Boolean, default: false },
     taxRate: { type: Number, default: 0 },
-    mainImage: { type: String, required: true, alias: "Images" }, 
+    mainImage: { type: String, alias: "Images" },
     galleryImages: [{ type: String }],
-    planFile: { type: [String], required: true },
+    planFile: { type: [String] },
     headerImage: { type: String },
     seo: {
       title: { type: String, trim: true, default: "" },
@@ -164,7 +166,7 @@ const productSchema = mongoose.Schema(
       enum: ["Published", "Pending Review", "Draft"],
       default: "Published",
     },
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, 
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   {
     timestamps: true,
