@@ -2,13 +2,14 @@ const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel.js");
 const jwt = require("jsonwebtoken");
 
+// Helper function to generate JWT token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "30d",
   });
 };
 
-// Validates fields based on the user's role
+// Helper function to validate fields based on user role
 const validateRoleFields = (role, body) => {
   const {
     name,
@@ -20,12 +21,10 @@ const validateRoleFields = (role, body) => {
     companyName,
     experience,
   } = body;
-
   switch (role) {
     case "user":
       if (!name) throw new Error("Full Name is required for Users");
       return { name, isApproved: true, status: "Approved" };
-
     case "professional":
       if (!name || !profession || !city || !experience)
         throw new Error(
@@ -39,7 +38,6 @@ const validateRoleFields = (role, body) => {
         isApproved: false,
         status: "Pending",
       };
-
     case "seller":
       if (!businessName || !address || !city || !materialType)
         throw new Error(
@@ -53,7 +51,6 @@ const validateRoleFields = (role, body) => {
         isApproved: false,
         status: "Pending",
       };
-
     case "Contractor":
       if (
         !name ||
@@ -76,16 +73,15 @@ const validateRoleFields = (role, body) => {
         isApproved: false,
         status: "Pending",
       };
-
     case "admin":
       if (!name) throw new Error("Full Name is required for Admin");
       return { name, isApproved: true, status: "Approved" };
-
     default:
       throw new Error("Invalid role specified");
   }
 };
 
+// Helper function to get the primary display name for a user
 const getUserDisplayName = (user) => {
   return user.name || user.businessName || user.companyName;
 };
@@ -101,33 +97,29 @@ const registerUser = asyncHandler(async (req, res) => {
       "Please provide all required fields: email, password, phone, and role"
     );
   }
-
   const userExists = await User.findOne({ email });
   if (userExists) {
     res.status(400);
     throw new Error("User with this email already exists");
   }
-
   let userData = { email, password, phone, role };
   try {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
+    // <<< YAHAN BADLAAV KIYA GAYA HAI: .path ko .location se badla gaya >>>
+    // .location S3 se file ka URL deta hai
     if (req.files) {
-      if (req.files.photo) {
-        userData.photoUrl = req.files.photo[0].path;
-      }
-      if (req.files.businessCertification) {
+      if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
+      if (req.files.businessCertification)
         userData.businessCertificationUrl =
-          req.files.businessCertification[0].path;
-      }
-      if (req.files.shopImage) {
-        userData.shopImageUrl = req.files.shopImage[0].path;
-      }
+          req.files.businessCertification[0].location;
+      if (req.files.shopImage)
+        userData.shopImageUrl = req.files.shopImage[0].location;
     }
+    // <<< BADLAAV KHATAM >>>
 
     const user = await User.create(userData);
-
     res.status(201).json({
       _id: user._id,
       email: user.email,
@@ -135,12 +127,6 @@ const registerUser = asyncHandler(async (req, res) => {
       name: getUserDisplayName(user),
       isApproved: user.isApproved,
       status: user.status,
-      photoUrl: user.photoUrl,
-      businessCertificationUrl: user.businessCertificationUrl,
-      shopImageUrl: user.shopImageUrl,
-      profession: user.profession,
-      experience: user.experience,
-      city: user.city,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -149,7 +135,7 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Create a new user via Admin panel
+// @desc    Create a new user by an Admin
 // @route   POST /api/users/admin/create
 // @access  Private/Admin
 const createUserByAdmin = asyncHandler(async (req, res) => {
@@ -167,8 +153,20 @@ const createUserByAdmin = asyncHandler(async (req, res) => {
   try {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
-    userData.isApproved = true;
+    userData.isApproved = true; // Admin dwara banaye gaye user hamesha approved hote hain
     userData.status = "Approved";
+
+    // <<< YAHAN BHI FILE HANDLING ADD KI GAYI HAI CONSISTENCY KE LIYE >>>
+    if (req.files) {
+      if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
+      if (req.files.businessCertification)
+        userData.businessCertificationUrl =
+          req.files.businessCertification[0].location;
+      if (req.files.shopImage)
+        userData.shopImageUrl = req.files.shopImage[0].location;
+    }
+    // <<< BADLAAV KHATAM >>>
+
     const user = await User.create(userData);
     res.status(201).json({
       _id: user._id,
@@ -192,7 +190,18 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new Error("Please provide email and password");
   }
   const user = await User.findOne({ email });
+
   if (user && (await user.matchPassword(password))) {
+    if (
+      ["professional", "seller", "Contractor"].includes(user.role) &&
+      !user.isApproved
+    ) {
+      res.status(403);
+      throw new Error(
+        `Your account is currently in "${user.status}" state. Please wait for admin approval.`
+      );
+    }
+
     res.json({
       _id: user._id,
       email: user.email,
@@ -258,7 +267,7 @@ const getUserById = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Update user
+// @desc    Update user by ID
 // @route   PUT /api/users/:id
 // @access  Private/Admin
 const updateUser = asyncHandler(async (req, res) => {
@@ -267,54 +276,87 @@ const updateUser = asyncHandler(async (req, res) => {
     throw new Error("Invalid user ID format");
   }
   const user = await User.findById(req.params.id);
+
   if (!user) {
     res.status(404);
     throw new Error("User not found");
   }
-  if (user.role === "admin" && req.user.role !== "admin") {
+
+  // Security Check: Allow update only if the requester is an Admin OR is updating their OWN profile.
+  if (
+    req.user.role !== "admin" &&
+    user._id.toString() !== req.user._id.toString()
+  ) {
     res.status(403);
-    throw new Error("Access denied: Cannot update admin users");
+    throw new Error("Not authorized to update this user's profile.");
   }
 
-  user.name = req.body.name || user.name;
+  // Update common fields
   user.email = req.body.email || user.email;
   user.phone = req.body.phone || user.phone;
 
-  if (req.body.isApproved !== undefined) {
-    user.isApproved = req.body.isApproved;
-  }
-  if (req.body.status) {
-    user.status = req.body.status;
-    if (req.body.status === "Approved") user.isApproved = true;
-    if (["Pending", "Rejected"].includes(req.body.status))
-      user.isApproved = false;
+  // Update password if a new one is provided
+  if (req.body.password) {
+    if (req.body.password.length < 6) {
+      res.status(400);
+      throw new Error("Password must be at least 6 characters long");
+    }
+    user.password = req.body.password; // Mongoose pre-save hook will hash it automatically
   }
 
+  // Update file uploads (using .location for S3)
   if (req.files) {
-    if (req.files.photo) user.photoUrl = req.files.photo[0].path;
+    if (req.files.photo) user.photoUrl = req.files.photo[0].location;
+    if (req.files.shopImage)
+      user.shopImageUrl = req.files.shopImage[0].location;
     if (req.files.businessCertification)
-      user.businessCertificationUrl = req.files.businessCertification[0].path;
-    if (req.files.shopImage) user.shopImageUrl = req.files.shopImage[0].path;
+      user.businessCertificationUrl =
+        req.files.businessCertification[0].location;
   }
 
-  if (user.role === "professional") {
-    user.profession = req.body.profession || user.profession;
-    user.city = req.body.city || user.city;
-    user.experience = req.body.experience || user.experience;
-  } else if (user.role === "seller") {
-    user.businessName = req.body.businessName || user.businessName;
-    user.address = req.body.address || user.address;
-    user.city = req.body.city || user.city;
-    user.materialType = req.body.materialType || user.materialType;
-  } else if (user.role === "Contractor") {
-    user.companyName = req.body.companyName || user.companyName;
-    user.address = req.body.address || user.address;
-    user.city = req.body.city || user.city;
-    user.experience = req.body.experience || user.experience;
-    user.profession = req.body.profession || user.profession;
+  // Role-specific field updates
+  switch (user.role) {
+    case "user":
+    case "admin":
+      user.name = req.body.name || user.name;
+      break;
+    case "professional":
+      user.name = req.body.name || user.name;
+      user.profession = req.body.profession || user.profession;
+      user.city = req.body.city || user.city;
+      user.experience = req.body.experience || user.experience;
+      break;
+    case "seller":
+      user.businessName = req.body.businessName || user.businessName;
+      user.address = req.body.address || user.address;
+      user.city = req.body.city || user.city;
+      user.materialType = req.body.materialType || user.materialType;
+      break;
+    case "Contractor":
+      user.name = req.body.name || user.name;
+      user.companyName = req.body.companyName || user.companyName;
+      user.address = req.body.address || user.address;
+      user.city = req.body.city || user.city;
+      user.experience = req.body.experience || user.experience;
+      user.profession = req.body.profession || user.profession;
+      break;
+  }
+
+  // Admin-only fields for changing status
+  if (req.user.role === "admin") {
+    if (req.body.status) {
+      user.status = req.body.status;
+      user.isApproved = req.body.status === "Approved";
+    }
+    if (req.body.isApproved !== undefined) {
+      user.isApproved = req.body.isApproved;
+      user.status = req.body.isApproved ? "Approved" : "Pending";
+    }
   }
 
   const updatedUser = await user.save();
+
+  // Send back updated info (without password)
   res.json({
     _id: updatedUser._id,
     name: getUserDisplayName(updatedUser),
@@ -323,20 +365,21 @@ const updateUser = asyncHandler(async (req, res) => {
     role: updatedUser.role,
     isApproved: updatedUser.isApproved,
     status: updatedUser.status,
-    profession: updatedUser.profession,
     businessName: updatedUser.businessName,
     companyName: updatedUser.companyName,
+    profession: updatedUser.profession,
+    experience: updatedUser.experience,
     address: updatedUser.address,
     city: updatedUser.city,
     materialType: updatedUser.materialType,
     photoUrl: updatedUser.photoUrl,
-    experience: updatedUser.experience,
-    businessCertificationUrl: updatedUser.businessCertificationUrl,
     shopImageUrl: updatedUser.shopImageUrl,
+    businessCertificationUrl: updatedUser.businessCertificationUrl,
+    token: generateToken(updatedUser._id), 
   });
 });
 
-// @desc    Delete user
+// @desc    Delete user by ID
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
 const deleteUser = asyncHandler(async (req, res) => {
@@ -384,6 +427,22 @@ const getUserStats = asyncHandler(async (req, res) => {
   res.json({ totalUsers, breakdown: stats });
 });
 
+// @desc    Get a single seller's public profile by ID
+// @route   GET /api/users/store/:sellerId
+// @access  Public
+const getSellerPublicProfile = asyncHandler(async (req, res) => {
+  const seller = await User.findById(req.params.sellerId).select(
+    "name businessName shopImageUrl city"
+  );
+
+  if (seller && seller.role === "seller") {
+    res.json(seller);
+  } else {
+    res.status(404);
+    throw new Error("Seller not found");
+  }
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -393,4 +452,5 @@ module.exports = {
   deleteUser,
   getUserStats,
   createUserByAdmin,
+  getSellerPublicProfile,
 };
