@@ -181,6 +181,7 @@ const getProductBySlug = asyncHandler(async (req, res) => {
   }
 });
 
+
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -188,7 +189,6 @@ const createProduct = asyncHandler(async (req, res) => {
     price,
     category,
     plotSize,
-    plotArea,
     country,
     planType,
     isSale,
@@ -201,35 +201,41 @@ const createProduct = asyncHandler(async (req, res) => {
     seoDescription,
     seoKeywords,
     seoAltText,
-    taxRate,
     crossSellProducts,
     upSellProducts,
   } = req.body;
 
-  if (
-    !name ||
-    !price ||
-    !category ||
-    !plotSize ||
-    !plotArea ||
-    !country ||
-    !planType ||
-    !city ||
-    !productNo
-  ) {
+  // 1. Zaroori fields ka validation
+  if (!name || !price || !productNo) {
     res.status(400);
-    throw new Error("Please fill all required fields.");
+    throw new Error("Please fill required fields: Name, Price, and Product No.");
   }
 
-  if (!req.files || !req.files.mainImage || !req.files.planFile) {
+  // 2. Main image ka validation
+  if (!req.files || !req.files.mainImage || req.files.mainImage.length === 0) {
     res.status(400);
-    throw new Error("Main image and at least one plan file are required.");
+    throw new Error("Main image is required.");
   }
+  
+  const numericFields = ['plotArea', 'rooms', 'bathrooms', 'kitchen', 'floors', 'salePrice', 'taxRate'];
+  
+  numericFields.forEach(field => {
+    if (req.body[field] !== undefined && req.body[field] !== null) {
+      const numValue = Number(req.body[field]);
+      if (isNaN(numValue)) {
+        delete req.body[field];
+      } else {
+        req.body[field] = numValue;
+      }
+    }
+  });
   const productExists = await Product.findOne({ productNo });
   if (productExists) {
     res.status(400);
     throw new Error("Product with this Product Number already exists.");
   }
+
+  // 5. Product data object taiyar karein
   const productData = {
     ...req.body,
     user: req.user._id,
@@ -239,13 +245,13 @@ const createProduct = asyncHandler(async (req, res) => {
     isSale: isSale === "true" || isSale === true,
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
+
   const getFilePath = (file) => file.location || file.path;
+
   try {
     productData.mainImage = getFilePath(req.files.mainImage[0]);
-    productData.planFile = req.files.planFile.map(getFilePath);
-    productData.galleryImages = req.files.galleryImages
-      ? req.files.galleryImages.map(getFilePath)
-      : [];
+    productData.planFile = (req.files.planFile && req.files.planFile.length > 0) ? req.files.planFile.map(getFilePath) : [];
+    productData.galleryImages = (req.files.galleryImages && req.files.galleryImages.length > 0) ? req.files.galleryImages.map(getFilePath) : [];
     if (req.files.headerImage && req.files.headerImage[0]) {
       productData.headerImage = getFilePath(req.files.headerImage[0]);
     }
@@ -254,23 +260,20 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(400).send("Error processing uploaded files");
     return;
   }
+  
+  // 7. Baaki optional data ko process karein
   if (planType === "Construction Products") {
-    productData.contactDetails = {
-      name: contactName || "",
-      email: contactEmail || "",
-      phone: contactPhone || "",
-    };
+    productData.contactDetails = { name: contactName || "", email: contactEmail || "", phone: contactPhone || "" };
   }
   productData.seo = {
     title: seoTitle || name,
-    description:
-      seoDescription || (description ? description.substring(0, 160) : ""),
+    description: seoDescription || (description ? description.substring(0, 160) : ""),
     keywords: seoKeywords || "",
     altText: seoAltText || name,
   };
-  if (taxRate && !isNaN(taxRate)) productData.taxRate = Number(taxRate);
   productData.crossSellProducts = normalizeToArray(crossSellProducts);
   productData.upSellProducts = normalizeToArray(upSellProducts);
+
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
