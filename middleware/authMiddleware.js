@@ -1,3 +1,5 @@
+// File: middleware/authMiddleware.js
+
 const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel.js");
@@ -32,7 +34,6 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 });
 
-// NEW 'softProtect' middleware for guest actions
 const softProtect = asyncHandler(async (req, res, next) => {
   let token;
   if (
@@ -44,8 +45,6 @@ const softProtect = asyncHandler(async (req, res, next) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = await User.findById(decoded.id).select("-password");
     } catch (error) {
-      // If token is invalid or missing, we don't throw an error.
-      // We just proceed without a user object attached to the request.
       req.user = null;
     }
   }
@@ -96,10 +95,46 @@ const professionalOrAdminProtect = (req, res, next) => {
   }
 };
 
+// --- SELLER KE LIYE NAYA MIDDLEWARE ---
+const sellerProtect = (req, res, next) => {
+  if (req.user && req.user.role === "seller") {
+    if (!req.user.isApproved) {
+      res.status(403);
+      throw new Error(
+        "Access Denied. Your seller account is pending admin approval."
+      );
+    }
+    next();
+  } else {
+    res.status(403);
+    throw new Error("Not authorized. This action is for sellers only.");
+  }
+};
+
+// --- SELLER YA ADMIN DONO KE LIYE MIDDLEWARE ---
+const sellerOrAdminProtect = (req, res, next) => {
+  if (req.user && (req.user.role === "seller" || req.user.role === "admin")) {
+    if (req.user.role === "seller" && !req.user.isApproved) {
+      res.status(403);
+      throw new Error(
+        "Access Denied. Your seller account is pending admin approval."
+      );
+    }
+    next();
+  } else {
+    res.status(403);
+    throw new Error(
+      "Not authorized. Only Sellers or Admins can perform this action."
+    );
+  }
+};
+
 module.exports = {
   protect,
   admin,
   softProtect,
   professionalProtect,
   professionalOrAdminProtect,
+  sellerProtect,
+  sellerOrAdminProtect,
 };
