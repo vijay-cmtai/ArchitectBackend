@@ -111,9 +111,34 @@ const addOrderItems = asyncHandler(async (req, res) => {
 
 const getMyOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({ user: req.user._id })
-    .populate({ path: "orderItems.productId", select: "name planFile" })
+    .populate({
+      path: "orderItems.productId",
+      select:
+        "name planFile mainImage Download\\ 1\\ URL Download\\ 2\\ URL Download\\ 3\\ URL",
+    })
     .sort({ createdAt: -1 });
-  res.json(orders);
+
+  // Add planFile to orderItems
+  const ordersWithFiles = orders.map((order) => {
+    const orderObj = order.toObject();
+    orderObj.orderItems = orderObj.orderItems.map((item) => {
+      if (item.productId) {
+        return {
+          ...item,
+          planFile:
+            item.productId.planFile ||
+            (item.productId["Download 1 URL"]
+              ? [item.productId["Download 1 URL"]]
+              : []),
+          image: item.image || item.productId.mainImage,
+        };
+      }
+      return item;
+    });
+    return orderObj;
+  });
+
+  res.json(ordersWithFiles);
 });
 
 const getOrderByIdForGuest = asyncHandler(async (req, res) => {
@@ -272,23 +297,19 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
           .json({ message: "PhonePe did not return a redirect URL" });
       }
     } else {
-      res
-        .status(500)
-        .json({
-          message: response.data.message || "PhonePe payment creation failed",
-        });
+      res.status(500).json({
+        message: response.data.message || "PhonePe payment creation failed",
+      });
     }
   } catch (error) {
     console.error(
       "PhonePe API Error:",
       error.response ? error.response.data : error.message
     );
-    res
-      .status(500)
-      .json({
-        message: "Failed to create PhonePe payment",
-        error: error.response ? error.response.data : error.message,
-      });
+    res.status(500).json({
+      message: "Failed to create PhonePe payment",
+      error: error.response ? error.response.data : error.message,
+    });
   }
 });
 
@@ -333,14 +354,38 @@ const handlePhonePeCallback = asyncHandler(async (req, res) => {
   }
   res.status(200).send({ message: "Callback received successfully" });
 });
-
 const getAllOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({})
     .populate("user", "id name email")
+    .populate({
+      path: "orderItems.productId",
+      select:
+        "name planFile mainImage Download\\ 1\\ URL Download\\ 2\\ URL Download\\ 3\\ URL",
+    })
     .sort({ createdAt: -1 });
-  res.json(orders);
-});
 
+  // Add planFile to orderItems
+  const ordersWithFiles = orders.map((order) => {
+    const orderObj = order.toObject();
+    orderObj.orderItems = orderObj.orderItems.map((item) => {
+      if (item.productId) {
+        return {
+          ...item,
+          planFile:
+            item.productId.planFile ||
+            (item.productId["Download 1 URL"]
+              ? [item.productId["Download 1 URL"]]
+              : []),
+          image: item.image || item.productId.mainImage,
+        };
+      }
+      return item;
+    });
+    return orderObj;
+  });
+
+  res.json(ordersWithFiles);
+});
 const updateOrderToPaidByAdmin = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (order) {
