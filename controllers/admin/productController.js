@@ -34,7 +34,7 @@ const getProducts = asyncHandler(async (req, res) => {
   const {
     searchTerm,
     country,
-    category, // This can still be used for sub-filtering
+    category,
     plotSize,
     plotArea,
     direction,
@@ -42,57 +42,62 @@ const getProducts = asyncHandler(async (req, res) => {
     propertyType,
     budget,
     sortBy,
-    planCategory, // YEH NAYA PARAMETER HAI JO PAGE TYPE BATAYEGA
+    planCategory,
   } = req.query;
 
-  // --- START: Naya Logic jo 'planCategory' ko handle karega ---
   if (planCategory) {
     let categoryQuery;
+    const lowerCasePlanCategory = planCategory.toLowerCase();
 
-    if (planCategory.toLowerCase() === 'floor-plans') {
-      // Logic for "Floor Plans"
+    if (lowerCasePlanCategory === "floor-plans") {
       categoryQuery = {
         $or: [
           { planType: { $regex: /^Floor Plans$/i } },
           { category: { $regex: /^Floor Plans$/i } },
-          { Categories: { $regex: /floor-plans/i } }
-        ]
+          { Categories: { $regex: /floor-plans/i } },
+        ],
       };
-    } else if (planCategory.toLowerCase() === 'elevations') {
-      // Logic for "Floor Plans + 3D Elevation"
+    } else if (lowerCasePlanCategory === "elevations") {
       categoryQuery = {
         $or: [
           { planType: { $regex: /Floor Plans.*\+.*3 ?D.*Elevation/i } },
           { category: { $regex: /FLOOR PLAN.*\+.*ELEVATION/i } },
-          { Categories: { $regex: /FLOOR PLAN.*\+.*ELEVATION/i } }
-        ]
+          { Categories: { $regex: /FLOOR PLAN.*\+.*ELEVATION/i } },
+        ],
       };
-    } else if (planCategory.toLowerCase() === 'interior-designs') {
-      // Logic for "Interior Designs"
+    } else if (lowerCasePlanCategory === "interior-designs") {
       categoryQuery = {
         $or: [
           { planType: { $regex: /Interior Designs/i } },
           { category: { $regex: /Interior Designs/i } },
-          { Categories: { $regex: /INTERIOR DESIGNS/i } }
-        ]
+          { Categories: { $regex: /INTERIOR DESIGNS/i } },
+        ],
       };
     }
-    
+    // --- यहाँ नया 'Downloads' का लॉजिक जोड़ा गया है ---
+    else if (lowerCasePlanCategory === "downloads") {
+      categoryQuery = {
+        planType: { $regex: /^Downloads$/i },
+      };
+    }
+
     if (categoryQuery) {
-        // `$and` ensures that this base category filter is always applied
-        query = { $and: [categoryQuery] };
+      query = { $and: [categoryQuery] };
     }
   }
 
-  // --- Baaki ke filters ko `$and` ke andar daal denge ---
   const otherFilters = {};
 
   if (searchTerm) {
     const searchRegex = { $regex: searchTerm, $options: "i" };
     otherFilters.$or = [
-      { name: searchRegex }, { Name: searchRegex },
-      { description: searchRegex }, { Description: searchRegex },
-      { city: searchRegex }, { productNo: searchRegex }, { SKU: searchRegex },
+      { name: searchRegex },
+      { Name: searchRegex },
+      { description: searchRegex },
+      { Description: searchRegex },
+      { city: searchRegex },
+      { productNo: searchRegex },
+      { SKU: searchRegex },
     ];
   }
 
@@ -100,7 +105,8 @@ const getProducts = asyncHandler(async (req, res) => {
   if (category && category !== "all") otherFilters.category = category;
   if (plotSize && plotSize !== "all") otherFilters.plotSize = plotSize;
   if (direction && direction !== "all") otherFilters.direction = direction;
-  if (propertyType && propertyType !== "all") otherFilters.propertyType = propertyType;
+  if (propertyType && propertyType !== "all")
+    otherFilters.propertyType = propertyType;
 
   if (floors && floors !== "all") {
     if (floors === "3") {
@@ -127,17 +133,15 @@ const getProducts = asyncHandler(async (req, res) => {
       }
     }
   }
-  
-  // Combine the planCategory filter with other filters
+
   if (Object.keys(otherFilters).length > 0) {
-      if(query.$and) {
-          query.$and.push(otherFilters);
-      } else {
-          query = {...query, ...otherFilters};
-      }
+    if (query.$and) {
+      query.$and.push(otherFilters);
+    } else {
+      query = { ...query, ...otherFilters };
+    }
   }
 
-  // Sorting
   let sortOptions = { _id: -1 };
   if (sortBy === "price-low") sortOptions = { price: 1 };
   if (sortBy === "price-high") sortOptions = { price: -1 };
@@ -181,7 +185,6 @@ const getProductBySlug = asyncHandler(async (req, res) => {
   }
 });
 
-
 const createProduct = asyncHandler(async (req, res) => {
   const {
     name,
@@ -205,21 +208,29 @@ const createProduct = asyncHandler(async (req, res) => {
     upSellProducts,
   } = req.body;
 
-  // 1. Zaroori fields ka validation
   if (!name || !price || !productNo) {
     res.status(400);
-    throw new Error("Please fill required fields: Name, Price, and Product No.");
+    throw new Error(
+      "Please fill required fields: Name, Price, and Product No."
+    );
   }
 
-  // 2. Main image ka validation
   if (!req.files || !req.files.mainImage || req.files.mainImage.length === 0) {
     res.status(400);
     throw new Error("Main image is required.");
   }
-  
-  const numericFields = ['plotArea', 'rooms', 'bathrooms', 'kitchen', 'floors', 'salePrice', 'taxRate'];
-  
-  numericFields.forEach(field => {
+
+  const numericFields = [
+    "plotArea",
+    "rooms",
+    "bathrooms",
+    "kitchen",
+    "floors",
+    "salePrice",
+    "taxRate",
+  ];
+
+  numericFields.forEach((field) => {
     if (req.body[field] !== undefined && req.body[field] !== null) {
       const numValue = Number(req.body[field]);
       if (isNaN(numValue)) {
@@ -235,7 +246,6 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error("Product with this Product Number already exists.");
   }
 
-  // 5. Product data object taiyar karein
   const productData = {
     ...req.body,
     user: req.user._id,
@@ -250,8 +260,14 @@ const createProduct = asyncHandler(async (req, res) => {
 
   try {
     productData.mainImage = getFilePath(req.files.mainImage[0]);
-    productData.planFile = (req.files.planFile && req.files.planFile.length > 0) ? req.files.planFile.map(getFilePath) : [];
-    productData.galleryImages = (req.files.galleryImages && req.files.galleryImages.length > 0) ? req.files.galleryImages.map(getFilePath) : [];
+    productData.planFile =
+      req.files.planFile && req.files.planFile.length > 0
+        ? req.files.planFile.map(getFilePath)
+        : [];
+    productData.galleryImages =
+      req.files.galleryImages && req.files.galleryImages.length > 0
+        ? req.files.galleryImages.map(getFilePath)
+        : [];
     if (req.files.headerImage && req.files.headerImage[0]) {
       productData.headerImage = getFilePath(req.files.headerImage[0]);
     }
@@ -260,14 +276,18 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(400).send("Error processing uploaded files");
     return;
   }
-  
-  // 7. Baaki optional data ko process karein
+
   if (planType === "Construction Products") {
-    productData.contactDetails = { name: contactName || "", email: contactEmail || "", phone: contactPhone || "" };
+    productData.contactDetails = {
+      name: contactName || "",
+      email: contactEmail || "",
+      phone: contactPhone || "",
+    };
   }
   productData.seo = {
     title: seoTitle || name,
-    description: seoDescription || (description ? description.substring(0, 160) : ""),
+    description:
+      seoDescription || (description ? description.substring(0, 160) : ""),
     keywords: seoKeywords || "",
     altText: seoAltText || name,
   };
@@ -286,26 +306,13 @@ const createProduct = asyncHandler(async (req, res) => {
   }
 });
 const updateProduct = asyncHandler(async (req, res) => {
-  const {
-    country,
-    city,
-    productNo,
-    contactName,
-    contactEmail,
-    contactPhone,
-    seoTitle,
-    seoDescription,
-    seoKeywords,
-    seoAltText,
-    taxRate,
-    crossSellProducts,
-    upSellProducts,
-  } = req.body;
   const product = await Product.findById(req.params.id);
+
   if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
+
   if (
     req.user.role !== "admin" &&
     (!product.user || product.user.toString() !== req.user._id.toString())
@@ -313,8 +320,13 @@ const updateProduct = asyncHandler(async (req, res) => {
     res.status(401);
     throw new Error("Not authorized to update this product");
   }
-  if (productNo && product.productNo !== productNo) {
-    const productExists = await Product.findOne({ productNo });
+
+  const updates = { ...req.body };
+
+  if (updates.productNo && product.productNo !== updates.productNo) {
+    const productExists = await Product.findOne({
+      productNo: updates.productNo,
+    });
     if (
       productExists &&
       productExists._id.toString() !== product._id.toString()
@@ -326,141 +338,98 @@ const updateProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  Object.keys(req.body).forEach((key) => {
-    const numericFields = [
-      "kitchen",
-      "bathrooms",
-      "floors",
-      "rooms",
-      "plotArea",
-      "price",
-      "salePrice",
-      "taxRate",
-    ];
-
-    if (numericFields.includes(key)) {
-      const value = req.body[key];
-      const numValue =
-        value !== "" && value !== null ? Number(value) : undefined;
-      req.body[key] = isNaN(numValue) ? undefined : numValue;
-    }
-
-    if (key === "direction" && req.body[key] === "") {
-      req.body[key] = undefined;
-    }
-  });
-
-  Object.keys(req.body).forEach((key) => {
-    const value = req.body[key];
-
-    if (value === undefined) return;
-
-    product[key] = value;
-
-    switch (key) {
-      case "name":
-        product.Name = value;
-        break;
-      case "description":
-        product.Description = value;
-        product["Short description"] = value;
-        break;
-      case "productNo":
-        product.SKU = value;
-        break;
-      case "price":
-        product["Regular price"] = Number(value);
-        break;
-      case "salePrice":
-        product["Sale price"] = Number(value) || undefined;
-        break;
-      case "plotSize":
-        product["Attribute 1 value(s)"] = value;
-        break;
-      case "plotArea":
-        product["Attribute 2 value(s)"] = `${value} sqft`;
-        break;
-      case "rooms":
-        product["Attribute 3 value(s)"] = value;
-        break;
-      case "direction":
-        product["Attribute 4 value(s)"] = value;
-        break;
-      case "floors":
-        product["Attribute 5 value(s)"] = value;
-        break;
-    }
-  });
-
-  if (country !== undefined) {
-    product.country = normalizeToArray(country);
-  }
-  if (req.body.category !== undefined) {
-    const normalizedCategories = normalizeToArray(req.body.category);
-    product.category = normalizedCategories;
-    product.Categories = normalizedCategories.join(", ");
-  }
-  if (city !== undefined) {
-    product.city = Array.isArray(city) ? city[0] : city;
-  }
-
-  if (req.body.isSale !== undefined) {
-    const isSaleBool = req.body.isSale === "true" || req.body.isSale === true;
-    product.isSale = isSaleBool;
-    product["Is featured?"] = isSaleBool ? 1 : 0;
-  }
-
-  if (product.planType === "Construction Products") {
-    if (!product.contactDetails) product.contactDetails = {};
-    if (contactName !== undefined) product.contactDetails.name = contactName;
-    if (contactEmail !== undefined) product.contactDetails.email = contactEmail;
-    if (contactPhone !== undefined) product.contactDetails.phone = contactPhone;
-  }
-
-  if (!product.seo) product.seo = {};
-  if (seoTitle !== undefined) product.seo.title = seoTitle;
-  if (seoDescription !== undefined) product.seo.description = seoDescription;
-  if (seoKeywords !== undefined) product.seo.keywords = seoKeywords;
-  if (seoAltText !== undefined) product.seo.altText = seoAltText;
-
-  if (taxRate !== undefined) {
-    const tax = Number(taxRate);
-    if (!isNaN(tax)) {
-      product.taxRate = tax;
-      product["Tax class"] = tax;
-    }
-  }
-
-  if (crossSellProducts !== undefined) {
-    product.crossSellProducts = normalizeToArray(crossSellProducts);
-    product["Cross-sells"] = normalizeToArray(crossSellProducts)
-      .map((id) => `id:${id}`)
-      .join(",");
-  }
-  if (upSellProducts !== undefined) {
-    product.upSellProducts = normalizeToArray(upSellProducts);
-    product.Upsells = normalizeToArray(upSellProducts)
-      .map((id) => `id:${id}`)
-      .join(",");
-  }
-
   if (req.files) {
     const getFilePath = (file) => file.location || file.path;
     if (req.files.mainImage) {
-      product.mainImage = getFilePath(req.files.mainImage[0]);
-      product.Images = getFilePath(req.files.mainImage[0]);
+      updates.mainImage = getFilePath(req.files.mainImage[0]);
+      updates.Images = updates.mainImage;
     }
     if (req.files.headerImage) {
-      product.headerImage = getFilePath(req.files.headerImage[0]);
+      updates.headerImage = getFilePath(req.files.headerImage[0]);
     }
     if (req.files.galleryImages) {
-      product.galleryImages = req.files.galleryImages.map(getFilePath);
+      updates.galleryImages = req.files.galleryImages.map(getFilePath);
     }
     if (req.files.planFile) {
       const newPlanFiles = req.files.planFile.map(getFilePath);
-      product.planFile = [...(product.planFile || []), ...newPlanFiles];
+      updates.planFile = [...(product.planFile || []), ...newPlanFiles];
     }
   }
+
+  if (
+    updates.seoTitle ||
+    updates.seoDescription ||
+    updates.seoKeywords ||
+    updates.seoAltText
+  ) {
+    product.seo = {
+      title:
+        updates.seoTitle !== undefined ? updates.seoTitle : product.seo.title,
+      description:
+        updates.seoDescription !== undefined
+          ? updates.seoDescription
+          : product.seo.description,
+      keywords:
+        updates.seoKeywords !== undefined
+          ? normalizeToArray(updates.seoKeywords)
+          : product.seo.keywords,
+      altText:
+        updates.seoAltText !== undefined
+          ? updates.seoAltText
+          : product.seo.altText,
+    };
+  }
+
+  if (updates.contactName || updates.contactEmail || updates.contactPhone) {
+    product.contactDetails = {
+      name:
+        updates.contactName !== undefined
+          ? updates.contactName
+          : product.contactDetails.name,
+      email:
+        updates.contactEmail !== undefined
+          ? updates.contactEmail
+          : product.contactDetails.email,
+      phone:
+        updates.contactPhone !== undefined
+          ? updates.contactPhone
+          : product.contactDetails.phone,
+    };
+  }
+
+  if (updates.country !== undefined) {
+    product.country = normalizeToArray(updates.country);
+  }
+  if (updates.category !== undefined) {
+    const normalizedCategories = normalizeToArray(updates.category);
+    product.category = normalizedCategories;
+    product.Categories = normalizedCategories.join(", ");
+  }
+  if (updates.crossSellProducts !== undefined) {
+    product.crossSellProducts = normalizeToArray(updates.crossSellProducts);
+  }
+  if (updates.upSellProducts !== undefined) {
+    product.upSellProducts = normalizeToArray(updates.upSellProducts);
+  }
+
+  Object.keys(updates).forEach((key) => {
+    const handledKeys = [
+      "seoTitle",
+      "seoDescription",
+      "seoKeywords",
+      "seoAltText",
+      "contactName",
+      "contactEmail",
+      "contactPhone",
+      "country",
+      "category",
+      "crossSellProducts",
+      "upSellProducts",
+    ];
+    if (handledKeys.includes(key)) return;
+
+    product[key] = updates[key];
+  });
 
   const updatedProduct = await product.save();
   await triggerVercelBuild();
