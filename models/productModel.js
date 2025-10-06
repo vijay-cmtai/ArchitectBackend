@@ -18,8 +18,6 @@ const productSchema = mongoose.Schema(
     name: { type: String, required: true, trim: true, alias: "Name" },
     productNo: { type: String, required: true, unique: true },
     price: { type: Number, required: true, default: 0, alias: "Regular price" },
-
-    // --- BAAKI SABHI FIELDS OPTIONAL HAIN ---
     description: { type: String },
     salePrice: { type: Number, default: 0, alias: "Sale price" },
     category: { type: [String], alias: "Categories" },
@@ -27,9 +25,9 @@ const productSchema = mongoose.Schema(
     plotSize: { type: String },
     plotArea: { type: Number },
     rooms: { type: Number, default: 0 },
-    bathrooms: { type: Number, default: 0 },
-    kitchen: { type: Number, default: 0 },
-    floors: { type: Number, default: 1 },
+    bathrooms: { type: String },
+    kitchen: { type: String },
+    floors: { type: String },
     direction: {
       type: String,
       enum: [
@@ -52,22 +50,24 @@ const productSchema = mongoose.Schema(
         "Floor Plan + 3D Elevations",
         "Interior Designs",
         "Construction Products",
+        "Downloads",
       ],
     },
     propertyType: {
       type: String,
-      enum: ["Residential", "Commercial"],
+      enum: ["Residential", "Commercial", "Rental"],
     },
     isSale: { type: Boolean, default: false },
     taxRate: { type: Number, default: 0 },
-    mainImage: { type: String, alias: "Images" },
+    mainImage: { type: String, alias: "Images", required: false },
+
     galleryImages: [{ type: String }],
     planFile: { type: [String] },
     headerImage: { type: String },
     seo: {
       title: { type: String, trim: true, default: "" },
       description: { type: String, trim: true, default: "" },
-      keywords: { type: String, trim: true, default: "" },
+      keywords: [{ type: String, trim: true }],
       altText: { type: String, trim: true, default: "" },
     },
     crossSellProducts: [
