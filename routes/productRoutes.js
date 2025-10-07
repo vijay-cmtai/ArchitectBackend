@@ -8,6 +8,7 @@ const {
   updateProduct,
   deleteProduct,
   createProductReview,
+  removeCsvImage,
 } = require("../controllers/admin/productController.js");
 const {
   protect,
@@ -36,5 +37,7 @@ router
   .delete(protect, professionalOrAdminProtect, deleteProduct);
 
 router.route("/:id/reviews").post(protect, createProductReview);
-
+router
+  .route("/:id/csv-image")
+  .delete(protect, professionalOrAdminProtect, removeCsvImage);
 module.exports = router;
