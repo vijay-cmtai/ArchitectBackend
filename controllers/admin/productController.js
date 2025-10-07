@@ -73,9 +73,7 @@ const getProducts = asyncHandler(async (req, res) => {
           { Categories: { $regex: /INTERIOR DESIGNS/i } },
         ],
       };
-    }
-    // --- यहाँ नया 'Downloads' का लॉजिक जोड़ा गया है ---
-    else if (lowerCasePlanCategory === "downloads") {
+    } else if (lowerCasePlanCategory === "downloads") {
       categoryQuery = {
         planType: { $regex: /^Downloads$/i },
       };
@@ -305,6 +303,7 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new Error(`Failed to save product: ${saveError.message}`);
   }
 });
+
 const updateProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
 
@@ -484,7 +483,62 @@ const createProductReview = asyncHandler(async (req, res) => {
     throw new Error("Product not found");
   }
 });
+// controllers/admin/productController.js
 
+// controllers/admin/productController.js
+
+const removeCsvImage = asyncHandler(async (req, res) => {
+  const { imageUrl } = req.body;
+  const productId = req.params.id; 
+
+  if (!imageUrl) {
+    res.status(400);
+    throw new Error("Image URL is required");
+  }
+
+  const product = await Product.findById(productId);
+
+  if (!product) {
+    res.status(404);
+    throw new Error("Product not found");
+  }
+
+  const imageString = product.Images;
+
+  if (!imageString || typeof imageString !== "string") {
+    return res
+      .status(404)
+      .json({
+        message:
+          "Image list for this product is already empty or does not exist.",
+      });
+  }
+
+  const imagesArray = imageString
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  const updatedImagesArray = imagesArray.filter(
+    (img) => img.trim() !== imageUrl.trim()
+  );
+
+  if (imagesArray.length === updatedImagesArray.length) {
+    return res
+      .status(404)
+      .json({ message: "Image URL not found in the product's image list." });
+  }
+
+  const newImageString = updatedImagesArray.join(", ");
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    { Images: newImageString },
+    { new: true } 
+  );
+
+  await triggerVercelBuild();
+  res.json(updatedProduct);
+});
 module.exports = {
   getProducts,
   getProductById,
@@ -493,4 +547,5 @@ module.exports = {
   updateProduct,
   deleteProduct,
   createProductReview,
+  removeCsvImage,
 };
