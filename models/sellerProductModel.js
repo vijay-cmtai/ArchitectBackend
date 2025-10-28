@@ -7,6 +7,12 @@ const sellerProductSchema = mongoose.Schema(
       required: true,
       ref: "User",
     },
+    // <<< YAHAN BADLAAV KIYA GAYA HAI >>>
+    city: {
+      type: String,
+      required: [true, "City is required for the product"],
+    },
+    // <<< BADLAAV KHATAM >>>
     name: {
       type: String,
       required: [true, "Please enter product name"],
