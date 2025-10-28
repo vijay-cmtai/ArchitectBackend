@@ -7,7 +7,6 @@ const sellerProductSchema = mongoose.Schema(
       required: true,
       ref: "User",
     },
-    // <<< YAHAN BADLAAV KIYA GAYA HAI >>>
     city: {
       type: String,
       required: [true, "City is required for the product"],
@@ -50,7 +49,7 @@ const sellerProductSchema = mongoose.Schema(
     },
     countInStock: {
       type: Number,
-      required: true,
+      required: false,
       default: 0,
     },
     isApproved: {
