@@ -1,5 +1,3 @@
-// models/galleryModel.js
-
 const mongoose = require("mongoose");
 
 const gallerySchema = mongoose.Schema(
@@ -9,11 +7,10 @@ const gallerySchema = mongoose.Schema(
       required: [true, "El título de la imagen es requerido"],
       trim: true,
     },
-    // ADDED: New field for SEO Alt Text
     altText: {
       type: String,
       trim: true,
-      default: "", // Default to empty string
+      default: "",
     },
     imageUrl: {
       type: String,
@@ -28,6 +25,11 @@ const gallerySchema = mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
       required: false,
+    },
+    productLink: {
+      type: String,
+      trim: true,
+      default: "",
     },
   },
   {

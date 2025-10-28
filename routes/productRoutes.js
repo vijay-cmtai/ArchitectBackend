@@ -3,10 +3,12 @@ const router = express.Router();
 const {
   getProducts,
   getProductById,
+  getProductBySlug,
   createProduct,
   updateProduct,
   deleteProduct,
   createProductReview,
+  removeCsvImage,
 } = require("../controllers/admin/productController.js");
 const {
   protect,
@@ -21,11 +23,10 @@ const handleFileUploads = upload.fields([
   { name: "headerImage", maxCount: 1 },
 ]);
 
-// --- Public Routes ---
 router.route("/").get(getProducts);
+router.route("/slug/:slug").get(getProductBySlug);
 router.route("/:id").get(getProductById);
 
-// --- Protected Routes ---
 router
   .route("/")
   .post(protect, professionalOrAdminProtect, handleFileUploads, createProduct);
@@ -36,5 +37,7 @@ router
   .delete(protect, professionalOrAdminProtect, deleteProduct);
 
 router.route("/:id/reviews").post(protect, createProductReview);
-
+router
+  .route("/:id/csv-image")
+  .delete(protect, professionalOrAdminProtect, removeCsvImage);
 module.exports = router;
