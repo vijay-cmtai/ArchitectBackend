@@ -8,19 +8,25 @@ const {
   getUniqueBrands,
   getUniqueCategories,
   getAllPublicProducts,
+  getAllProductsForAdmin,
 } = require("../controllers/sellerProductController.js");
 
-// --- YAHAN BADLAAV KIYA GAYA HAI ---
-// `professionalProtect` ki jagah `sellerProtect` ko import karein
-const { protect, sellerProtect } = require("../middleware/authMiddleware.js");
-// ------------------------------------
-
+const {
+  protect,
+  sellerProtect,
+  admin,
+} = require("../middleware/authMiddleware.js");
 const upload = require("../middleware/uploadMiddleware.js");
 
 const handleFileUploads = upload.fields([
   { name: "image", maxCount: 1 },
   { name: "images", maxCount: 5 },
 ]);
+
+router.get("/public/all", getAllPublicProducts);
+
+router.route("/admin/all").get(protect, admin, getAllProductsForAdmin);
+
 router.get("/brands", protect, sellerProtect, getUniqueBrands);
 router.get("/categories", protect, sellerProtect, getUniqueCategories);
 
@@ -31,8 +37,7 @@ router
 
 router
   .route("/:id")
-  .put(protect, sellerProtect, handleFileUploads, updateMyProduct)
-  .delete(protect, sellerProtect, deleteMyProduct);
-router.get("/public/all", getAllPublicProducts);
+  .put(protect, handleFileUploads, updateMyProduct)
+  .delete(protect, deleteMyProduct);
 
 module.exports = router;
