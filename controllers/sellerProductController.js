@@ -1,8 +1,11 @@
+// File: controllers/sellerProductController.js
+
 const asyncHandler = require("express-async-handler");
 const SellerProduct = require("../models/sellerProductModel.js");
 const Brand = require("../models/brandModel.js");
 const Category = require("../models/categoryModel.js");
 
+// ... (findOrCreate function waise hi rahega) ...
 const findOrCreate = async (model, name) => {
   if (!name) return;
   const doc = await model.findOne({
@@ -13,13 +16,32 @@ const findOrCreate = async (model, name) => {
   }
 };
 
+// =================================================================
+// 1. CREATE PRODUCT FUNCTION MEIN BADLAAV
+// =================================================================
 const createSellerProduct = asyncHandler(async (req, res) => {
-  const { name, description, brand, category, price, salePrice, countInStock } =
-    req.body;
+  // <<< CITY ko req.body se nikaalein >>>
+  const {
+    name,
+    description,
+    brand,
+    category,
+    price,
+    salePrice,
+    countInStock,
+    city,
+  } = req.body;
 
-  if (!name || !brand || !category || !price || countInStock === undefined) {
+  if (
+    !name ||
+    !brand ||
+    !category ||
+    !price ||
+    countInStock === undefined ||
+    !city
+  ) {
     res.status(400);
-    throw new Error("Please fill all required fields");
+    throw new Error("Please fill all required fields, including city");
   }
 
   if (!req.files || !req.files.image || req.files.image.length === 0) {
@@ -46,6 +68,7 @@ const createSellerProduct = asyncHandler(async (req, res) => {
     countInStock,
     image: mainImageUrl,
     images: galleryImageUrls,
+    city, // <<< City ab req.body se aa rahi hai >>>
     status: "Approved",
     isApproved: true,
   });
@@ -54,6 +77,7 @@ const createSellerProduct = asyncHandler(async (req, res) => {
   res.status(201).json(createdProduct);
 });
 
+// ... (getMyProducts function waise hi rahega) ...
 const getMyProducts = asyncHandler(async (req, res) => {
   const products = await SellerProduct.find({ seller: req.user._id }).sort({
     createdAt: -1,
@@ -61,9 +85,21 @@ const getMyProducts = asyncHandler(async (req, res) => {
   res.json(products);
 });
 
+// =================================================================
+// 2. UPDATE PRODUCT FUNCTION MEIN BADLAAV
+// =================================================================
 const updateMyProduct = asyncHandler(async (req, res) => {
-  const { name, description, brand, category, price, salePrice, countInStock } =
-    req.body;
+  // <<< CITY ko req.body se nikaalein >>>
+  const {
+    name,
+    description,
+    brand,
+    category,
+    price,
+    salePrice,
+    countInStock,
+    city,
+  } = req.body;
   const product = await SellerProduct.findById(req.params.id);
 
   if (!product) {
@@ -88,6 +124,9 @@ const updateMyProduct = asyncHandler(async (req, res) => {
   product.countInStock =
     countInStock !== undefined ? countInStock : product.countInStock;
 
+  // <<< CITY ko bhi update karein agar form mein di gayi hai >>>
+  product.city = city || product.city;
+
   if (req.files) {
     if (req.files.image && req.files.image.length > 0) {
       product.image = req.files.image[0].location;
@@ -104,6 +143,8 @@ const updateMyProduct = asyncHandler(async (req, res) => {
   res.json(updatedProduct);
 });
 
+// Baaki sabhi functions (deleteMyProduct, getAllPublicProducts, etc.) waise hi rahenge.
+// ...
 const deleteMyProduct = asyncHandler(async (req, res) => {
   const product = await SellerProduct.findById(req.params.id);
 
@@ -121,7 +162,6 @@ const deleteMyProduct = asyncHandler(async (req, res) => {
   res.json({ message: "Product removed successfully." });
 });
 
-// NAYE FUNCTIONS ISI FILE MEIN ADD KIYE GAYE HAIN
 const getUniqueBrands = asyncHandler(async (req, res) => {
   const brands = await Brand.find({}).sort({ name: 1 });
   res.json(brands);
@@ -131,13 +171,20 @@ const getUniqueCategories = asyncHandler(async (req, res) => {
   const categories = await Category.find({}).sort({ name: 1 });
   res.json(categories);
 });
-const getAllPublicProducts = asyncHandler(async (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 12; // Ek page par 12 products
-  const page = parseInt(req.query.page, 10) || 1;
 
-  const count = await SellerProduct.countDocuments({ isApproved: true });
-  const products = await SellerProduct.find({ isApproved: true })
-    .populate("seller", "businessName photoUrl") // photoUrl yahan se aayega
+const getAllPublicProducts = asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 12;
+  const page = parseInt(req.query.page, 10) || 1;
+  const { city } = req.query;
+
+  let filter = { isApproved: true };
+  if (city) {
+    filter.city = { $regex: new RegExp(`^${city}$`, "i") };
+  }
+
+  const count = await SellerProduct.countDocuments(filter);
+  const products = await SellerProduct.find(filter)
+    .populate("seller", "businessName photoUrl")
     .sort({ createdAt: -1 })
     .limit(limit)
     .skip(limit * (page - 1));
