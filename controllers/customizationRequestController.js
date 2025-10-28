@@ -8,8 +8,8 @@ const CustomizationRequest = require("../models/customizationRequestModel.js");
 // @access  Public
 const createCustomizationRequest = asyncHandler(async (req, res) => {
   const {
-    // ++ FIX HERE: Destructure 'countryName' instead of 'country' ++
-    countryName,
+    // ++ CHANGE HERE: Destructure 'country' from the request body ++
+    country,
     requestType,
     name,
     email,
@@ -25,15 +25,15 @@ const createCustomizationRequest = asyncHandler(async (req, res) => {
     description,
   } = req.body;
 
-  // ++ FIX HERE: Add 'countryName' to the validation check ++
-  if (!countryName || !requestType || !name || !email || !whatsappNumber) {
+  // ++ CHANGE HERE: Add 'country' to the validation check ++
+  if (!country || !requestType || !name || !email || !whatsappNumber) {
     res.status(400);
     throw new Error("Please fill all required fields.");
   }
 
-  // Build the request data object. No more mapping needed.
+  // ++ CHANGE HERE: Explicitly build the request data object to map 'country' to 'countryName' ++
   const requestData = {
-    countryName,
+    countryName: country, // Map the 'country' form field to the 'countryName' model field
     requestType,
     name,
     email,

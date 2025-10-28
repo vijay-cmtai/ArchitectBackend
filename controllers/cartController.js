@@ -1,90 +1,46 @@
+// src/controllers/cartController.js
+
 const asyncHandler = require("express-async-handler");
 const Cart = require("../models/cartModel.js");
-const Product = require("../models/productModel.js");
-const ProfessionalPlan = require("../models/professionalPlanModel.js");
-
-// --- हेल्पर फंक्शन (यहीं पर सारे फिक्स हैं) ---
-const getPlanDetails = async (productId) => {
-  let plan = await Product.findById(productId).lean(); // .lean() for faster, plain JS object
-  if (plan) {
-    // FIX 1: Price को सही से पढ़ें
-    const regularPrice =
-      plan.price !== 0 && plan.price
-        ? plan.price
-        : (plan["Regular price"] ?? 0);
-    const salePrice =
-      plan.salePrice !== 0 && plan.salePrice
-        ? plan.salePrice
-        : plan["Sale price"];
-
-    // FIX 2: isSale का लॉजिक अब JSON डेटा को भी समझेगा
-    const isSale =
-      plan.isSale ??
-      (salePrice != null && salePrice > 0 && salePrice < regularPrice);
-
-    return {
-      productId: plan._id,
-      name: plan.name || plan.Name,
-      price: isSale && salePrice != null ? salePrice : regularPrice,
-      salePrice: salePrice,
-      isSale: isSale,
-      image:
-        plan.mainImage ||
-        (plan.Images ? plan.Images.split(",")[0].trim() : undefined),
-      size: plan.plotSize || plan["Attribute 1 value(s)"],
-      // FIX 3: Tax को सही से पढ़ें
-      taxRate: plan.taxRate || plan["Tax class"] || 0,
-    };
-  }
-
-  plan = await ProfessionalPlan.findById(productId).lean();
-  if (plan) {
-    return {
-      productId: plan._id,
-      name: plan.planName,
-      price: plan.isSale && plan.salePrice ? plan.salePrice : plan.price,
-      salePrice: plan.salePrice,
-      isSale: plan.isSale,
-      image: plan.mainImage,
-      size: plan.plotSize,
-      taxRate: plan.taxRate || 0,
-    };
-  }
-
-  return null;
-};
+const Product = require("../models/productModel.js"); // Product model ko import karein
 
 // @desc    Get user's cart
+// @route   GET /api/cart
+// @access  Private
 const getCart = asyncHandler(async (req, res) => {
-  const cart = await Cart.findOne({ user: req.user._id });
+  // Populate mein saari zaroori fields add karein
+  const cart = await Cart.findOne({ user: req.user._id }).populate(
+    "items.productId",
+    "name price salePrice isSale taxRate discountPercentage" // Yahan fields add ki gayi hain
+  );
+
   if (cart) {
     res.json(cart);
   } else {
+    // If no cart exists, create an empty one for the user
     const newCart = await Cart.create({ user: req.user._id, items: [] });
     res.json(newCart);
   }
 });
 
 // @desc    Add or update an item in the cart
+// @route   POST /api/cart
+// @access  Private
 const addOrUpdateCartItem = asyncHandler(async (req, res) => {
-  const { productId, quantity } = req.body;
+  // Client se sirf productId aur quantity lein. Size optional ho sakta hai.
+  const { productId, quantity, size } = req.body;
   const userId = req.user._id;
 
-  if (!productId || !quantity) {
-    res.status(400);
-    throw new Error("Product ID and quantity are required.");
-  }
-
-  // अब यह हेल्पर फंक्शन सही जानकारी (taxRate सहित) लाएगा
-  const productDetails = await getPlanDetails(productId);
-  if (!productDetails) {
+  // Product ki details database se fetch karein
+  const product = await Product.findById(productId);
+  if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
 
   let cart = await Cart.findOne({ user: userId });
   if (!cart) {
-    cart = new Cart({ user: userId, items: [] });
+    cart = await Cart.create({ user: userId, items: [] });
   }
 
   const existingItemIndex = cart.items.findIndex(
@@ -92,44 +48,73 @@ const addOrUpdateCartItem = asyncHandler(async (req, res) => {
   );
 
   if (existingItemIndex > -1) {
+    // If item exists, update its quantity
     cart.items[existingItemIndex].quantity = quantity;
   } else {
-    cart.items.push({
-      ...productDetails,
-      quantity: quantity,
-    });
+    // If item does not exist, add it to the cart with all details from the product
+    const cartItem = {
+      productId: product._id,
+      name: product.name,
+      quantity,
+      // Store the effective price (sale price if available, otherwise regular price)
+      price:
+        product.isSale && product.salePrice > 0
+          ? product.salePrice
+          : product.price,
+      // Store all other relevant details
+      salePrice: product.salePrice,
+      isSale: product.isSale,
+      taxRate: product.taxRate,
+      discountPercentage: product.discountPercentage,
+      image: product.mainImage, // Assuming mainImage is the correct field
+      size: size || product.plotSize, // Use provided size or default from product
+    };
+    cart.items.push(cartItem);
   }
 
   const updatedCart = await cart.save();
-  res.status(201).json(updatedCart);
+  // Response mein updated cart ko populate karke bhejein taaki frontend ko hamesha latest data mile
+  const populatedCart = await updatedCart.populate(
+    "items.productId",
+    "name price salePrice isSale taxRate discountPercentage"
+  );
+  res.status(201).json(populatedCart);
 });
 
 // @desc    Remove an item from the cart
+// @route   DELETE /api/cart/:productId
+// @access  Private
 const removeCartItem = asyncHandler(async (req, res) => {
   const { productId } = req.params;
-  const cart = await Cart.findOne({ user: req.user._id });
+  const userId = req.user._id;
+
+  const cart = await Cart.findOne({ user: userId });
 
   if (cart) {
     cart.items = cart.items.filter(
       (item) => item.productId.toString() !== productId
     );
-    await cart.save();
-    res.json(cart);
+    const updatedCart = await cart.save();
+    res.json(updatedCart);
   } else {
     res.status(404);
     throw new Error("Cart not found");
   }
 });
 
-// @desc    Clear all items from the cart
+// @desc    Clear all items from the cart (e.g., after a successful order)
+// @route   DELETE /api/cart
+// @access  Private
 const clearCart = asyncHandler(async (req, res) => {
-  const cart = await Cart.findOne({ user: req.user._id });
+  const userId = req.user._id;
+  const cart = await Cart.findOne({ user: userId });
 
   if (cart) {
     cart.items = [];
     await cart.save();
     res.json({ message: "Cart cleared successfully" });
   } else {
+    // If no cart, that's fine, just send success
     res.json({ message: "Cart is already empty" });
   }
 });

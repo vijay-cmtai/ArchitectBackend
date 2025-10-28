@@ -1,3 +1,5 @@
+// models/userModel.js
+
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
@@ -24,13 +26,10 @@ const userSchema = mongoose.Schema(
     // Profile Image
     photoUrl: { type: String },
 
-    // Fields for Professional, Seller & Contractor
+    // Fields for Professional & Contractor
     profession: { type: String },
-    businessCertificationUrl: { type: String },
-    shopImageUrl: { type: String },
-    city: { type: String },
-    address: { type: String },
-    experience: { type: String }, // Added for Professional and Contractor
+    businessCertificationUrl: { type: String }, // Now common for Professional & Contractor
+    shopImageUrl: { type: String }, // Now common for Professional & Contractor
 
     // For Seller
     businessName: { type: String },
@@ -38,6 +37,11 @@ const userSchema = mongoose.Schema(
 
     // For Contractor
     companyName: { type: String },
+    experience: { type: String },
+
+    // Common for Seller and Contractor
+    address: { type: String },
+    city: { type: String },
   },
   {
     timestamps: true,

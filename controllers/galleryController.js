@@ -1,38 +1,40 @@
+// controllers/galleryController.js
+
 const asyncHandler = require("express-async-handler");
 const Gallery = require("../models/galleryModel.js");
+const fs = require("fs");
 
-// @desc    Create a new gallery item
+// @desc    Crear un nuevo item en la galería
 // @route   POST /api/gallery
 // @access  Private/Admin
 const createGalleryItem = asyncHandler(async (req, res) => {
-  // --- ✨ productLink has been added here ---
-  const { title, category, relatedProduct, altText, productLink } = req.body;
+  // CHANGED: Added altText to destructuring
+  const { title, category, relatedProduct, altText } = req.body;
 
   if (!title) {
     res.status(400);
-    throw new Error("Title is required."); // Message in English
+    throw new Error("El título es obligatorio.");
   }
 
   if (!req.file) {
     res.status(400);
-    throw new Error("Image is required."); // Message in English
+    throw new Error("La imagen es obligatoria.");
   }
 
   const galleryItem = new Gallery({
     title,
-    altText: altText || title,
+    // ADDED: altText is now saved with the item
+    altText: altText || title, // Use altText if provided, otherwise fallback to title
     category,
     relatedProduct: relatedProduct || undefined,
-    imageUrl: req.file.location, // URL from S3
-    // --- ✨ productLink is being saved here ---
-    productLink: productLink || "", // Save empty string if no link is provided
+    imageUrl: req.file.location, // Path from multer (e.g., S3 location)
   });
 
   const createdItem = await galleryItem.save();
   res.status(201).json(createdItem);
 });
 
-// @desc    Get all gallery items
+// @desc    Obtener todos los items de la galería
 // @route   GET /api/gallery
 // @access  Public
 const getGalleryItems = asyncHandler(async (req, res) => {
@@ -40,19 +42,22 @@ const getGalleryItems = asyncHandler(async (req, res) => {
   res.json(galleryItems);
 });
 
-// @desc    Delete a gallery item
+// @desc    Eliminar un item de la galería
 // @route   DELETE /api/gallery/:id
 // @access  Private/Admin
 const deleteGalleryItem = asyncHandler(async (req, res) => {
   const galleryItem = await Gallery.findById(req.params.id);
 
   if (galleryItem) {
-    // Logic for deleting the image from S3 would go here if needed
+    // NOTE: fs.unlinkSync will only work for local storage, not for cloud storage like S3.
+    // For S3, you would need to use the AWS SDK to delete the object from the bucket.
+    // This part is left as is, assuming your upload middleware handles deletion.
+
     await galleryItem.deleteOne();
-    res.json({ message: "Gallery image removed successfully." }); // Message in English
+    res.json({ message: "Imagen de la galería eliminada con éxito." });
   } else {
     res.status(404);
-    throw new Error("Image not found."); // Message in English
+    throw new Error("Imagen no encontrada.");
   }
 });
 

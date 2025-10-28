@@ -1,3 +1,5 @@
+// routes/orderRoutes.js
+
 const express = require("express");
 const {
   addOrderItems,
@@ -7,47 +9,31 @@ const {
   getPaypalClientId,
   updateOrderToPaidWithPaypal,
   createPhonePePayment,
-  handlePhonePeCallback,
   getAllOrders,
   updateOrderToPaidByAdmin,
   deleteOrder,
-  getOrderByIdForGuest,
 } = require("../controllers/orderController.js");
 
-const {
-  protect,
-  admin,
-  softProtect,
-} = require("../middleware/authMiddleware.js");
+const { protect, admin } = require("../middleware/authMiddleware.js");
 
 const router = express.Router();
 
-// --- PUBLIC & GUEST ROUTES ---
-router.route("/").post(softProtect, addOrderItems);
-router.route("/guest/:orderId").get(getOrderByIdForGuest);
-
-// --- USER-ONLY ROUTES (Require login) ---
+// --- USER ROUTES ---
+router.route("/").post(protect, addOrderItems);
 router.route("/myorders").get(protect, getMyOrders);
+router.route("/paypal/client-id").get(protect, getPaypalClientId);
 
 // --- PAYMENT GATEWAY ROUTES ---
-router
-  .route("/:id/create-razorpay-order")
-  .post(softProtect, createRazorpayOrder);
-router
-  .route("/:id/verify-payment")
-  .post(softProtect, verifyPaymentAndUpdateOrder);
-router
-  .route("/:id/pay-with-paypal")
-  .put(softProtect, updateOrderToPaidWithPaypal);
-router
-  .route("/:id/create-phonepe-payment")
-  .post(softProtect, createPhonePePayment);
-router.route("/phonepe-callback").post(handlePhonePeCallback); // PhonePe server-to-server call doesn't need protection
-router.route("/paypal/client-id").get(getPaypalClientId);
+router.route("/:id/create-razorpay-order").post(protect, createRazorpayOrder);
+router.route("/:id/verify-payment").post(protect, verifyPaymentAndUpdateOrder);
+router.route("/:id/pay-with-paypal").put(protect, updateOrderToPaidWithPaypal);
+router.route("/:id/create-phonepe-payment").post(protect, createPhonePePayment);
 
-// --- ADMIN-ONLY ROUTES (Require admin login) ---
+// --- ADMIN ROUTES ---
 router.route("/all").get(protect, admin, getAllOrders);
+
 router.route("/:id").delete(protect, admin, deleteOrder);
+
 router.route("/:id/mark-as-paid").put(protect, admin, updateOrderToPaidByAdmin);
 
 module.exports = router;
