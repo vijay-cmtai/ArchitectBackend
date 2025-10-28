@@ -1,55 +1,51 @@
-// server.js
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const path = require("path");
 const connectDB = require("./config/db");
 
-// --- Import Routes ---
 const userRoutes = require("./routes/userRoutes");
 const productRoutes = require("./routes/productRoutes");
 const professionalPlanRoutes = require("./routes/professionalPlanRoutes");
 const customizationRequestRoutes = require("./routes/customizationRequestRoutes");
 const standardRequestRoutes = require("./routes/standardRequestRoutes");
+const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const premiumRequestRoutes = require("./routes/premiumRequestRoutes");
 const corporateInquiryRoutes = require("./routes/corporateInquiryRoutes");
-const inquiryRoutes = require("./routes/inquiryRoutes");
-const cartRoutes = require("./routes/cartRoutes");
-const orderRoutes = require("./routes/orderRoutes");
+const inquiryRoutes = require("./routes/inquiryRoutes.js");
+const cartRoutes = require("./routes/cartRoutes.js");
+const orderRoutes = require("./routes/orderRoutes.js");
 const adminRoutes = require("./routes/adminRoutes");
-const wishlistRoutes = require("./routes/wishlistRoutes");
-const blogRoutes = require("./routes/blogRoutes");
-const galleryRoutes = require("./routes/galleryRoutes");
-const videoRoutes = require("./routes/videoRoutes");
-const packageRoutes = require("./routes/packageRoutes");
-const professionalOrderRoutes = require("./routes/professionalOrderRoutes");
+const wishlistRoutes = require("./routes/wishlistRoutes.js");
+const blogRoutes = require("./routes/blogRoutes.js");
+const galleryRoutes = require("./routes/galleryRoutes.js");
+const videoRoutes = require("./routes/videoRoutes.js");
+const packageRoutes = require("./routes/packageRoutes.js");
+const professionalOrderRoutes = require("./routes/professionalOrderRoutes.js");
 const sellerProductRoutes = require("./routes/sellerProductRoutes");
-const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes");
-const mediaRoutes = require("./routes/mediaRoutes");
+const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
+const mediaRoutes = require("./routes/mediaRoutes.js");
 
-// --- Middleware ---
-const { notFound, errorHandler } = require("./middleware/errorMiddleware");
-
-// --- Environment & DB Connection ---
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// ✅ --- FIXED & PRODUCTION-SAFE CORS CONFIG ---
+// ✅ --- CORS Configuration (Local + Production Ready) ---
 const allowedOrigins = [
-  "https://www.houseplanfiles.com",
-  "https://houseplanfiles.com",
-  "http://localhost:3000",
-  "http://localhost:3036", // optional local port
+  "http://localhost:3000", // React local
+  "http://localhost:3036", // optional second local port
+  "https://houseplanfiles.com", // production
+  "https://www.houseplanfiles.com", // production with www
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps or curl)
+      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      console.warn(`🚫 CORS blocked request from origin: ${origin}`);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
@@ -58,22 +54,22 @@ app.use(
   })
 );
 
-// ✅ Handle Preflight (OPTIONS) requests for all routes
+// Handle Preflight (OPTIONS)
 app.options("*", cors());
 
-// ✅ Body Parser
+// ✅ Body Parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ Static folder for uploads
+// ✅ Static folder
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
-// ✅ Test Route
+// ✅ Base Route
 app.get("/", (req, res) => {
-  res.send("✅ API is running successfully...");
+  res.send("✅ API is running...");
 });
 
-// ✅ All Routes
+// ✅ API Routes
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/professional-plans", professionalPlanRoutes);
@@ -95,12 +91,10 @@ app.use("/api/seller/products", sellerProductRoutes);
 app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use("/api/media", mediaRoutes);
 
-// ✅ Error Middleware
+// ✅ Error Handling
 app.use(notFound);
 app.use(errorHandler);
 
-// ✅ Start Server
+// ✅ Server Listen
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
