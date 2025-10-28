@@ -1,20 +1,11 @@
-// models/videoModel.js
 const mongoose = require("mongoose");
 
-// Helper function to extract YouTube video ID from URL
 const extractYouTubeId = (url) => {
   if (!url) return null;
-
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
-    /youtube\.com\/watch\?.*v=([^&\n?#]+)/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return match[1];
-  }
-  return null;
+  const regExp =
+    /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return match && match[2].length === 11 ? match[2] : null;
 };
 
 const videoSchema = new mongoose.Schema(
@@ -33,24 +24,22 @@ const videoSchema = new mongoose.Schema(
       type: String,
       required: [true, "Please provide a YouTube link"],
       trim: true,
-      validate: {
-        validator: function (url) {
-          return extractYouTubeId(url) !== null;
-        },
-        message: "Please provide a valid YouTube URL",
-      },
     },
-    // Add youtubeVideoId field that will be auto-generated
     youtubeVideoId: {
       type: String,
       unique: true,
-      sparse: true, // Allows multiple null values, but unique non-null values
+      sparse: true,
     },
     topic: {
       type: String,
       required: [true, "Please provide a topic"],
       trim: true,
       index: true,
+    },
+    productLink: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product", 
+      required: false, 
     },
   },
   {
@@ -60,15 +49,20 @@ const videoSchema = new mongoose.Schema(
 
 // Pre-save middleware to extract and set youtubeVideoId
 videoSchema.pre("save", function (next) {
-  if (this.youtubeLink && this.isModified("youtubeLink")) {
-    this.youtubeVideoId = extractYouTubeId(this.youtubeLink);
+  if (this.isModified("youtubeLink")) {
+    const videoId = extractYouTubeId(this.youtubeLink);
+    if (videoId) {
+      this.youtubeVideoId = videoId;
+    } else {
+      const err = new Error("Invalid YouTube URL format in model.");
+      return next(err); 
+    }
   }
   next();
 });
 
 // Add indexes for better performance
 videoSchema.index({ topic: 1, createdAt: -1 });
-videoSchema.index({ youtubeVideoId: 1 }, { unique: true, sparse: true });
 
 const Video = mongoose.model("Video", videoSchema);
 module.exports = Video;

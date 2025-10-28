@@ -17,7 +17,7 @@ const {
   updateProfessionalPlanStatus,
   deleteProfessionalPlan,
   getAllRequestsAndInquiries,
-  getReportsData, 
+  getReportsData, // ✨ नया फंक्शन इम्पोर्ट करें
 } = require("../controllers/adminController.js");
 
 router.use(protect, admin);

@@ -1,5 +1,3 @@
-// models/customizationRequestModel.js
-
 const mongoose = require("mongoose");
 
 const customizationRequestSchema = mongoose.Schema(
@@ -7,7 +5,7 @@ const customizationRequestSchema = mongoose.Schema(
     // ++ CHANGE HERE: Added countryName field ++
     countryName: {
       type: String,
-      required: [false, "Country name is required."],
+      required: [true, "Country name is required."], // This was likely intended to be true to cause the error.
       trim: true,
     },
     requestType: {
