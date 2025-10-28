@@ -435,16 +435,20 @@ const updateProduct = asyncHandler(async (req, res) => {
   res.json(updatedProduct);
 });
 
+// <<< YAHAN BADLAAV KIYA GAYA HAI >>>
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
+
   if (product) {
+    // Permission check ko theek kiya gaya hai
     if (
-      product.user.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
+      req.user.role !== "admin" &&
+      (!product.user || product.user.toString() !== req.user._id.toString())
     ) {
       res.status(401);
       throw new Error("Not authorized to delete this product");
     }
+
     await product.deleteOne();
     await triggerVercelBuild();
     res.json({ message: "Product removed successfully" });
@@ -453,6 +457,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
     throw new Error("Product not found");
   }
 });
+// <<< BADLAAV KHATAM >>>
 
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
@@ -483,13 +488,10 @@ const createProductReview = asyncHandler(async (req, res) => {
     throw new Error("Product not found");
   }
 });
-// controllers/admin/productController.js
-
-// controllers/admin/productController.js
 
 const removeCsvImage = asyncHandler(async (req, res) => {
   const { imageUrl } = req.body;
-  const productId = req.params.id; 
+  const productId = req.params.id;
 
   if (!imageUrl) {
     res.status(400);
@@ -506,12 +508,10 @@ const removeCsvImage = asyncHandler(async (req, res) => {
   const imageString = product.Images;
 
   if (!imageString || typeof imageString !== "string") {
-    return res
-      .status(404)
-      .json({
-        message:
-          "Image list for this product is already empty or does not exist.",
-      });
+    return res.status(404).json({
+      message:
+        "Image list for this product is already empty or does not exist.",
+    });
   }
 
   const imagesArray = imageString
@@ -533,12 +533,13 @@ const removeCsvImage = asyncHandler(async (req, res) => {
   const updatedProduct = await Product.findByIdAndUpdate(
     productId,
     { Images: newImageString },
-    { new: true } 
+    { new: true }
   );
 
   await triggerVercelBuild();
   res.json(updatedProduct);
 });
+
 module.exports = {
   getProducts,
   getProductById,
