@@ -1,11 +1,8 @@
-// File: controllers/sellerProductController.js
-
 const asyncHandler = require("express-async-handler");
 const SellerProduct = require("../models/sellerProductModel.js");
 const Brand = require("../models/brandModel.js");
 const Category = require("../models/categoryModel.js");
 
-// ... (findOrCreate function waise hi rahega) ...
 const findOrCreate = async (model, name) => {
   if (!name) return;
   const doc = await model.findOne({
@@ -16,11 +13,7 @@ const findOrCreate = async (model, name) => {
   }
 };
 
-// =================================================================
-// 1. CREATE PRODUCT FUNCTION MEIN BADLAAV
-// =================================================================
 const createSellerProduct = asyncHandler(async (req, res) => {
-  // <<< CITY ko req.body se nikaalein >>>
   const {
     name,
     description,
@@ -68,7 +61,7 @@ const createSellerProduct = asyncHandler(async (req, res) => {
     countInStock,
     image: mainImageUrl,
     images: galleryImageUrls,
-    city, // <<< City ab req.body se aa rahi hai >>>
+    city,
     status: "Approved",
     isApproved: true,
   });
@@ -77,7 +70,6 @@ const createSellerProduct = asyncHandler(async (req, res) => {
   res.status(201).json(createdProduct);
 });
 
-// ... (getMyProducts function waise hi rahega) ...
 const getMyProducts = asyncHandler(async (req, res) => {
   const products = await SellerProduct.find({ seller: req.user._id }).sort({
     createdAt: -1,
@@ -85,11 +77,22 @@ const getMyProducts = asyncHandler(async (req, res) => {
   res.json(products);
 });
 
-// =================================================================
-// 2. UPDATE PRODUCT FUNCTION MEIN BADLAAV
-// =================================================================
 const updateMyProduct = asyncHandler(async (req, res) => {
-  // <<< CITY ko req.body se nikaalein >>>
+  const product = await SellerProduct.findById(req.params.id);
+
+  if (!product) {
+    res.status(404);
+    throw new Error("Product not found");
+  }
+
+  if (
+    product.seller.toString() !== req.user._id.toString() &&
+    req.user.role !== "admin"
+  ) {
+    res.status(401);
+    throw new Error("Not authorized to update this product.");
+  }
+
   const {
     name,
     description,
@@ -100,20 +103,6 @@ const updateMyProduct = asyncHandler(async (req, res) => {
     countInStock,
     city,
   } = req.body;
-  const product = await SellerProduct.findById(req.params.id);
-
-  if (!product) {
-    res.status(404);
-    throw new Error("Product not found");
-  }
-
-  if (product.seller.toString() !== req.user._id.toString()) {
-    res.status(401);
-    throw new Error("You are not authorized to update this product.");
-  }
-
-  await findOrCreate(Brand, brand);
-  await findOrCreate(Category, category);
 
   product.name = name || product.name;
   product.description = description || product.description;
@@ -123,8 +112,6 @@ const updateMyProduct = asyncHandler(async (req, res) => {
   product.salePrice = salePrice !== undefined ? salePrice : product.salePrice;
   product.countInStock =
     countInStock !== undefined ? countInStock : product.countInStock;
-
-  // <<< CITY ko bhi update karein agar form mein di gayi hai >>>
   product.city = city || product.city;
 
   if (req.files) {
@@ -136,15 +123,10 @@ const updateMyProduct = asyncHandler(async (req, res) => {
     }
   }
 
-  product.status = "Approved";
-  product.isApproved = true;
-
   const updatedProduct = await product.save();
   res.json(updatedProduct);
 });
 
-// Baaki sabhi functions (deleteMyProduct, getAllPublicProducts, etc.) waise hi rahenge.
-// ...
 const deleteMyProduct = asyncHandler(async (req, res) => {
   const product = await SellerProduct.findById(req.params.id);
 
@@ -153,9 +135,12 @@ const deleteMyProduct = asyncHandler(async (req, res) => {
     throw new Error("Product not found");
   }
 
-  if (product.seller.toString() !== req.user._id.toString()) {
+  if (
+    product.seller.toString() !== req.user._id.toString() &&
+    req.user.role !== "admin"
+  ) {
     res.status(401);
-    throw new Error("You are not authorized to delete this product.");
+    throw new Error("Not authorized to delete this product.");
   }
 
   await SellerProduct.deleteOne({ _id: req.params.id });
@@ -197,6 +182,34 @@ const getAllPublicProducts = asyncHandler(async (req, res) => {
   });
 });
 
+const getAllProductsForAdmin = asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const skip = (page - 1) * limit;
+
+  let filter = {};
+  if (req.query.city) {
+    filter.city = { $regex: req.query.city, $options: "i" };
+  }
+
+  const products = await SellerProduct.find(filter)
+    .populate("seller", "businessName email")
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
+  const totalProducts = await SellerProduct.countDocuments(filter);
+
+  res.json({
+    products,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(totalProducts / limit),
+      totalProducts,
+    },
+  });
+});
+
 module.exports = {
   createSellerProduct,
   getMyProducts,
@@ -205,4 +218,5 @@ module.exports = {
   getUniqueBrands,
   getUniqueCategories,
   getAllPublicProducts,
+  getAllProductsForAdmin,
 };
