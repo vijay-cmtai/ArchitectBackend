@@ -1,5 +1,8 @@
+// File: controllers/admin/productController.js
+
 const asyncHandler = require("express-async-handler");
 const Product = require("../../models/productModel.js");
+const User = require("../../models/userModel.js"); // === BADLAV 1: User model ko import kiya gaya ===
 const axios = require("axios");
 
 const VERCEL_BUILD_HOOK_URL =
@@ -25,12 +28,36 @@ const normalizeToArray = (value) => {
   return [value];
 };
 
+// === BADLAV 2: Is function ko update kiya gaya hai ===
+// Ab yeh sirf 'professional' users ke products hi fetch karega.
+const getAdminProducts = asyncHandler(async (req, res) => {
+  // 1. Sabhi 'professional' role wale users ki ID nikalo
+  const professionalUsers = await User.find({ role: "professional" }).select(
+    "_id"
+  );
+  const professionalUserIds = professionalUsers.map((user) => user._id);
+
+  // 2. Sirf unhi products ko find karo jinka user in IDs mein se ek hai
+  const products = await Product.find({ user: { $in: professionalUserIds } })
+    .populate("user", "name")
+    .sort({ createdAt: -1 });
+
+  res.json({ products });
+});
+
+// PROFESSIONAL KE KHUD KE PRODUCTS KE LIYE
+const getMyProducts = asyncHandler(async (req, res) => {
+  const products = await Product.find({ user: req.user._id }).sort({
+    createdAt: -1,
+  });
+  res.json({ products });
+});
+
+// PUBLIC VIEW KE LIYE (SIRF PUBLISHED)
 const getProducts = asyncHandler(async (req, res) => {
   const pageSize = parseInt(req.query.limit) || 12;
   const page = parseInt(req.query.pageNumber) || 1;
-
-  let query = {};
-
+  let query = { status: "Published" };
   const {
     searchTerm,
     country,
@@ -44,11 +71,9 @@ const getProducts = asyncHandler(async (req, res) => {
     sortBy,
     planCategory,
   } = req.query;
-
   if (planCategory) {
     let categoryQuery;
     const lowerCasePlanCategory = planCategory.toLowerCase();
-
     if (lowerCasePlanCategory === "floor-plans") {
       categoryQuery = {
         $or: [
@@ -74,18 +99,14 @@ const getProducts = asyncHandler(async (req, res) => {
         ],
       };
     } else if (lowerCasePlanCategory === "downloads") {
-      categoryQuery = {
-        planType: { $regex: /^Downloads$/i },
-      };
+      categoryQuery = { planType: { $regex: /^Downloads$/i } };
     }
-
     if (categoryQuery) {
-      query = { $and: [categoryQuery] };
+      if (!query.$and) query.$and = [];
+      query.$and.push(categoryQuery);
     }
   }
-
   const otherFilters = {};
-
   if (searchTerm) {
     const searchRegex = { $regex: searchTerm, $options: "i" };
     otherFilters.$or = [
@@ -98,14 +119,12 @@ const getProducts = asyncHandler(async (req, res) => {
       { SKU: searchRegex },
     ];
   }
-
   if (country) otherFilters.country = country;
   if (category && category !== "all") otherFilters.category = category;
   if (plotSize && plotSize !== "all") otherFilters.plotSize = plotSize;
   if (direction && direction !== "all") otherFilters.direction = direction;
   if (propertyType && propertyType !== "all")
     otherFilters.propertyType = propertyType;
-
   if (floors && floors !== "all") {
     if (floors === "3") {
       otherFilters.floors = { $gte: 3 };
@@ -113,14 +132,12 @@ const getProducts = asyncHandler(async (req, res) => {
       otherFilters.floors = Number(floors);
     }
   }
-
   if (budget) {
     const [min, max] = budget.split("-").map(Number);
     if (!isNaN(min) && !isNaN(max)) {
       otherFilters.price = { $gte: min, $lte: max };
     }
   }
-
   if (plotArea && plotArea !== "all") {
     if (plotArea === "2000+") {
       otherFilters.plotArea = { $gte: 2000 };
@@ -131,7 +148,6 @@ const getProducts = asyncHandler(async (req, res) => {
       }
     }
   }
-
   if (Object.keys(otherFilters).length > 0) {
     if (query.$and) {
       query.$and.push(otherFilters);
@@ -139,26 +155,23 @@ const getProducts = asyncHandler(async (req, res) => {
       query = { ...query, ...otherFilters };
     }
   }
-
   let sortOptions = { _id: -1 };
   if (sortBy === "price-low") sortOptions = { price: 1 };
   if (sortBy === "price-high") sortOptions = { price: -1 };
-
   const count = await Product.countDocuments(query);
   const products = await Product.find(query)
     .sort(sortOptions)
     .limit(pageSize)
     .skip(pageSize * (page - 1))
     .populate("user", "name profession");
-
   res.json({ products, page, pages: Math.ceil(count / pageSize), count });
 });
 
 const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id)
     .populate("crossSellProducts", "name mainImage price salePrice isSale slug")
-    .populate("upSellProducts", "name mainImage price salePrice isSale slug");
-
+    .populate("upSellProducts", "name mainImage price salePrice isSale slug")
+    .populate("user", "name email profession");
   if (product) {
     res.json(product);
   } else {
@@ -170,11 +183,10 @@ const getProductById = asyncHandler(async (req, res) => {
 const getProductBySlug = asyncHandler(async (req, res) => {
   const slug = req.params.slug;
   const productId = slug.split("-").pop();
-
   const product = await Product.findById(productId)
     .populate("crossSellProducts", "name mainImage price salePrice isSale slug")
-    .populate("upSellProducts", "name mainImage price salePrice isSale slug");
-
+    .populate("upSellProducts", "name mainImage price salePrice isSale slug")
+    .populate("user", "name email profession");
   if (product) {
     res.json(product);
   } else {
@@ -205,19 +217,16 @@ const createProduct = asyncHandler(async (req, res) => {
     crossSellProducts,
     upSellProducts,
   } = req.body;
-
   if (!name || !price || !productNo) {
     res.status(400);
     throw new Error(
       "Please fill required fields: Name, Price, and Product No."
     );
   }
-
-  if (!req.files || !req.files.mainImage || req.files.mainImage.length === 0) {
+  if (!req.files || !req.files.mainImage || !req.files.mainImage.length === 0) {
     res.status(400);
     throw new Error("Main image is required.");
   }
-
   const numericFields = [
     "plotArea",
     "rooms",
@@ -227,7 +236,6 @@ const createProduct = asyncHandler(async (req, res) => {
     "salePrice",
     "taxRate",
   ];
-
   numericFields.forEach((field) => {
     if (req.body[field] !== undefined && req.body[field] !== null) {
       const numValue = Number(req.body[field]);
@@ -243,7 +251,6 @@ const createProduct = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("Product with this Product Number already exists.");
   }
-
   const productData = {
     ...req.body,
     user: req.user._id,
@@ -253,9 +260,7 @@ const createProduct = asyncHandler(async (req, res) => {
     isSale: isSale === "true" || isSale === true,
     status: req.user.role === "admin" ? "Published" : "Pending Review",
   };
-
   const getFilePath = (file) => file.location || file.path;
-
   try {
     productData.mainImage = getFilePath(req.files.mainImage[0]);
     productData.planFile =
@@ -271,10 +276,8 @@ const createProduct = asyncHandler(async (req, res) => {
     }
   } catch (error) {
     console.error("Error processing files:", error);
-    res.status(400).send("Error processing uploaded files");
-    return;
+    res.status(400).throw(new Error("Error processing uploaded files"));
   }
-
   if (planType === "Construction Products") {
     productData.contactDetails = {
       name: contactName || "",
@@ -291,11 +294,12 @@ const createProduct = asyncHandler(async (req, res) => {
   };
   productData.crossSellProducts = normalizeToArray(crossSellProducts);
   productData.upSellProducts = normalizeToArray(upSellProducts);
-
   try {
     const product = new Product(productData);
     const createdProduct = await product.save();
-    await triggerVercelBuild();
+    if (createdProduct.status === "Published") {
+      await triggerVercelBuild();
+    }
     res.status(201).json(createdProduct);
   } catch (saveError) {
     console.error("Error saving product:", saveError);
@@ -306,22 +310,19 @@ const createProduct = asyncHandler(async (req, res) => {
 
 const updateProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
-
   if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
-
-  if (
-    req.user.role !== "admin" &&
-    (!product.user || product.user.toString() !== req.user._id.toString())
-  ) {
+  const updates = { ...req.body };
+  if (req.user.role === "admin") {
+  } else if (product.user.toString() !== req.user._id.toString()) {
     res.status(401);
     throw new Error("Not authorized to update this product");
   }
-
-  const updates = { ...req.body };
-
+  if (req.user.role !== "admin" && updates.status) {
+    delete updates.status;
+  }
   if (updates.productNo && product.productNo !== updates.productNo) {
     const productExists = await Product.findOne({
       productNo: updates.productNo,
@@ -336,7 +337,6 @@ const updateProduct = asyncHandler(async (req, res) => {
       );
     }
   }
-
   if (req.files) {
     const getFilePath = (file) => file.location || file.path;
     if (req.files.mainImage) {
@@ -354,7 +354,6 @@ const updateProduct = asyncHandler(async (req, res) => {
       updates.planFile = [...(product.planFile || []), ...newPlanFiles];
     }
   }
-
   if (
     updates.seoTitle ||
     updates.seoDescription ||
@@ -378,24 +377,22 @@ const updateProduct = asyncHandler(async (req, res) => {
           : product.seo.altText,
     };
   }
-
   if (updates.contactName || updates.contactEmail || updates.contactPhone) {
     product.contactDetails = {
       name:
         updates.contactName !== undefined
           ? updates.contactName
-          : product.contactDetails.name,
+          : product.contactDetails?.name || "",
       email:
         updates.contactEmail !== undefined
           ? updates.contactEmail
-          : product.contactDetails.email,
+          : product.contactDetails?.email || "",
       phone:
         updates.contactPhone !== undefined
           ? updates.contactPhone
-          : product.contactDetails.phone,
+          : product.contactDetails?.phone || "",
     };
   }
-
   if (updates.country !== undefined) {
     product.country = normalizeToArray(updates.country);
   }
@@ -410,7 +407,6 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (updates.upSellProducts !== undefined) {
     product.upSellProducts = normalizeToArray(updates.upSellProducts);
   }
-
   Object.keys(updates).forEach((key) => {
     const handledKeys = [
       "seoTitle",
@@ -426,21 +422,18 @@ const updateProduct = asyncHandler(async (req, res) => {
       "upSellProducts",
     ];
     if (handledKeys.includes(key)) return;
-
     product[key] = updates[key];
   });
-
   const updatedProduct = await product.save();
-  await triggerVercelBuild();
+  if (updatedProduct.status === "Published") {
+    await triggerVercelBuild();
+  }
   res.json(updatedProduct);
 });
 
-// <<< YAHAN BADLAAV KIYA GAYA HAI >>>
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
-
   if (product) {
-    // Permission check ko theek kiya gaya hai
     if (
       req.user.role !== "admin" &&
       (!product.user || product.user.toString() !== req.user._id.toString())
@@ -448,7 +441,6 @@ const deleteProduct = asyncHandler(async (req, res) => {
       res.status(401);
       throw new Error("Not authorized to delete this product");
     }
-
     await product.deleteOne();
     await triggerVercelBuild();
     res.json({ message: "Product removed successfully" });
@@ -457,7 +449,6 @@ const deleteProduct = asyncHandler(async (req, res) => {
     throw new Error("Product not found");
   }
 });
-// <<< BADLAAV KHATAM >>>
 
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
@@ -492,56 +483,48 @@ const createProductReview = asyncHandler(async (req, res) => {
 const removeCsvImage = asyncHandler(async (req, res) => {
   const { imageUrl } = req.body;
   const productId = req.params.id;
-
   if (!imageUrl) {
     res.status(400);
     throw new Error("Image URL is required");
   }
-
   const product = await Product.findById(productId);
-
   if (!product) {
     res.status(404);
     throw new Error("Product not found");
   }
-
   const imageString = product.Images;
-
   if (!imageString || typeof imageString !== "string") {
     return res.status(404).json({
       message:
         "Image list for this product is already empty or does not exist.",
     });
   }
-
   const imagesArray = imageString
     .split(",")
     .map((url) => url.trim())
     .filter(Boolean);
-
   const updatedImagesArray = imagesArray.filter(
     (img) => img.trim() !== imageUrl.trim()
   );
-
   if (imagesArray.length === updatedImagesArray.length) {
     return res
       .status(404)
       .json({ message: "Image URL not found in the product's image list." });
   }
-
   const newImageString = updatedImagesArray.join(", ");
   const updatedProduct = await Product.findByIdAndUpdate(
     productId,
     { Images: newImageString },
     { new: true }
   );
-
   await triggerVercelBuild();
   res.json(updatedProduct);
 });
 
 module.exports = {
   getProducts,
+  getAdminProducts,
+  getMyProducts,
   getProductById,
   getProductBySlug,
   createProduct,
