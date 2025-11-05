@@ -25,6 +25,7 @@ const professionalOrderRoutes = require("./routes/professionalOrderRoutes.js");
 const sellerProductRoutes = require("./routes/sellerProductRoutes");
 const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
 const mediaRoutes = require("./routes/mediaRoutes.js");
+const shareRoutes = require("./routes/shareRoutes");
 
 dotenv.config();
 connectDB();
@@ -67,6 +68,8 @@ app.use("/api/professional-orders", professionalOrderRoutes);
 app.use("/api/seller/products", sellerProductRoutes);
 app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use("/api/media", mediaRoutes);
+app.use("/share", shareRoutes);
+
 
 app.use(notFound);
 app.use(errorHandler);
