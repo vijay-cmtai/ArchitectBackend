@@ -4,7 +4,6 @@ const cors = require("cors");
 const path = require("path");
 const connectDB = require("./config/db");
 
-// Aapke saare route imports
 const userRoutes = require("./routes/userRoutes");
 const productRoutes = require("./routes/productRoutes");
 const professionalPlanRoutes = require("./routes/professionalPlanRoutes");
@@ -26,27 +25,29 @@ const professionalOrderRoutes = require("./routes/professionalOrderRoutes.js");
 const sellerProductRoutes = require("./routes/sellerProductRoutes");
 const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
 const mediaRoutes = require("./routes/mediaRoutes.js");
-
-// shareRoutes se router aur handler dono import karein
-const { router: shareRouter, handleShareRequest } = require("./routes/shareRoutes");
+const shareRoutes = require("./routes/shareRoutes");
 
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// Aapka CORS configuration
+// ✅ CORS FIXED — only this part changed
 app.use(
   cors({
-    origin: ["https://www.houseplanfiles.com", "http://localhost:3000", "http://localhost:5173"],
+    origin: ["https://www.houseplanfiles.com", "http://localhost:3000"],
     credentials: true,
   })
 );
 
 app.use(express.json());
 
+app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
-// --- API ROUTES ---
+app.get("/", (req, res) => {
+  res.send("API is running...");
+});
+
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/professional-plans", professionalPlanRoutes);
@@ -67,57 +68,11 @@ app.use("/api/professional-orders", professionalOrderRoutes);
 app.use("/api/seller/products", sellerProductRoutes);
 app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use("/api/media", mediaRoutes);
+app.use("/share", shareRoutes);
 
-// Share button ke special URL ke liye '.router' use karein
-app.use("/share", shareRouter);
-
-
-// Social Share Middleware jo direct copy-paste kiye gaye URLs ke liye bots ko pakadta hai
-const socialShareMiddleware = async (req, res, next) => {
-  const userAgent = req.headers["user-agent"] || "";
-  const crawlers = [ "facebookexternalhit", "Twitterbot", "WhatsApp", "LinkedInBot", "Pinterest", "TelegramBot" ];
-  const isCrawler = crawlers.some((crawler) => userAgent.toLowerCase().includes(crawler.toLowerCase()));
-
-  const productMatch = req.path.match(/^\/product\/(.*)/);
-  const planMatch = req.path.match(/^\/professional-plan\/(.*)/);
-
-  if (isCrawler) {
-    if (productMatch) {
-      req.params.slug = productMatch[1];
-      return handleShareRequest(req, res, "product");
-    }
-    if (planMatch) {
-      req.params.slug = planMatch[1];
-      return handleShareRequest(req, res, "professional-plan");
-    }
-  }
-  next();
-};
-
-
-// --- FRONTEND SERVING LOGIC (API routes ke baad) ---
-app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
-
-// Production environment mein React app ko serve karein
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "/frontend/dist")));
-
-  // Middleware ko React app serve karne se theek pehle use karein
-  app.use(socialShareMiddleware);
-
-  // ⭐ FIX: '*' ko regex /.*/ se replace kiya gaya hai taaki error na aaye
-  app.get(/.*/, (req, res) =>
-    res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"))
-  );
-} else {
-  app.get("/", (req, res) => {
-    res.send("API is running in development mode...");
-  });
-}
-
-// --- ERROR HANDLING MIDDLEWARE (sabse aakhir mein) ---
 app.use(notFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, console.log(`Server running on port ${PORT}`));
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
