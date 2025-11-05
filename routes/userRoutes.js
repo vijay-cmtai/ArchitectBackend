@@ -22,19 +22,16 @@ const handleUserUploads = upload.fields([
   { name: "shopImage", maxCount: 1 },
 ]);
 
-// --- Public Routes ---
 router.post("/register", handleUserUploads, registerUser);
 router.post("/login", loginUser);
 router.get("/store/:sellerId", getSellerPublicProfile);
+router.route("/").get(getAllUsers);
 
-// --- Admin-Only Routes ---
-router.route("/").get(protect, admin, getAllUsers);
 router
   .route("/admin/create")
   .post(protect, admin, handleUserUploads, createUserByAdmin);
 router.route("/stats").get(protect, admin, getUserStats);
 
-// --- User & Admin Routes ---
 router
   .route("/:id")
   .get(protect, admin, getUserById)
