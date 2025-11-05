@@ -96,7 +96,7 @@ const socialShareMiddleware = async (req, res, next) => {
 
 
 // --- FRONTEND SERVING LOGIC (API routes ke baad) ---
-const __dirname = path.resolve();
+// ⭐ FIX: Yahan se 'const __dirname = path.resolve();' line hata di gayi hai
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
 // Production environment mein React app ko serve karein
