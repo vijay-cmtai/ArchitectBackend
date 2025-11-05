@@ -1,4 +1,3 @@
-// backend/routes/shareRoutes.js
 const express = require("express");
 const router = express.Router();
 const Product = require("../models/productModel");
@@ -7,13 +6,8 @@ const Product = require("../models/productModel");
 const generateShareHTML = (data) => {
   const { name, description, image, url, price } = data;
 
-  const cleanDescription = description
-    .replace(/<[^>]*>/g, "")
-    .substring(0, 160);
-  
-  // Is function me ab kuch nahi badalna hai, kyunki hum absolute URL pehle hi bana kar bhejenge.
-  // Lekin fir bhi ek fallback rakhna aacha hai.
-  const absoluteImageUrl = image; 
+  // Clean description from HTML tags
+  const cleanDescription = description.replace(/<[^>]*>/g, "").substring(0, 160);
 
   return `
 <!DOCTYPE html>
@@ -32,11 +26,10 @@ const generateShareHTML = (data) => {
     <meta property="og:url" content="${url}">
     <meta property="og:title" content="${name}">
     <meta property="og:description" content="${cleanDescription}">
-    <meta property="og:image" content="${absoluteImageUrl}">
-    <meta property="og:image:secure_url" content="${absoluteImageUrl}">
+    <meta property="og:image" content="${image}">
+    <meta property="og:image:secure_url" content="${image}">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:type" content="image/jpeg">
     <meta property="og:site_name" content="House Plan Files">
     ${price ? `<meta property="product:price:amount" content="${price}">` : ""}
     ${price ? `<meta property="product:price:currency" content="INR">` : ""}
@@ -46,57 +39,54 @@ const generateShareHTML = (data) => {
     <meta name="twitter:url" content="${url}">
     <meta name="twitter:title" content="${name}">
     <meta name="twitter:description" content="${cleanDescription}">
-    <meta name="twitter:image" content="${absoluteImageUrl}">
-    <meta name="twitter:image:alt" content="${name}">
+    <meta name="twitter:image" content="${image}">
     
     <!-- Redirect to actual page -->
     <meta http-equiv="refresh" content="0;url=${url}">
-    <script>
-      setTimeout(function() { window.location.href = "${url}"; }, 100);
-    </script>
+    <script>setTimeout(() => window.location.href = "${url}", 50);</script>
     
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-      .loader { text-align: center; }
-      .spinner { border: 4px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 4px solid white; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      a { color: white; text-decoration: underline; }
+      body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }
+      .loader { text-align: center; color: #333; }
     </style>
 </head>
 <body>
     <div class="loader">
-      <div class="spinner"></div>
       <h2>${name}</h2>
-      <p>Loading your plan...</p>
-      <p style="font-size: 14px; opacity: 0.8; margin-top: 20px;">If you're not redirected, <a href="${url}">click here</a></p>
+      <p>Redirecting to the plan page...</p>
+      <p style="font-size: 14px;"><a href="${url}">Click here</a> if you are not redirected.</p>
     </div>
 </body>
 </html>
   `;
 };
 
-// Generic handler for both types of products to avoid repeating code
+// Generic handler for both types of products
 const handleShareRequest = async (req, res, type) => {
-  const slug = req.params.slug;
+  const { slug } = req.params;
   const id = slug.split("-").pop();
 
-  const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/${type}/${slug}`;
-  const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"; // IMPORTANT: Use BACKEND_URL
+  // Redirect ke liye FRONTEND URL ka istemal hoga
+  const frontendUrl = `${process.env.FRONTEND_URL || "https://www.houseplanfiles.com"}/${type}/${slug}`;
+  
+  // Image banane ke liye BACKEND URL ka istemal hoga
+  const backendUrl = process.env.BACKEND_URL || "https://architect-backend.vercel.app";
 
   try {
     const item = await Product.findById(id);
 
+    // Agar item nahi milta, to seedha frontend par redirect kar do
     if (!item) {
-      return res.status(404).send(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${frontendUrl}"></head><body>Item not found. Redirecting...</body></html>`);
+      return res.redirect(frontendUrl);
     }
 
-    const itemName = item.name || item.planName || item.Name || "House Plan";
-    const itemDescription = item.description || item.Description || "Premium house plan design";
+    const itemName = item.name || item.Name || "House Plan";
+    const itemDescription = item.description || item.Description || "Find and purchase architectural house plans for your dream home.";
     
-    // Get the relative image path from the database
-    const relativeImagePath = item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : "/default-image.jpg");
+    // Database se relative image path nikalo
+    const relativeImagePath = item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : "/default-logo.png"); // Ek default logo rakhein
     
-    // Create the full, absolute image URL using the BACKEND_URL
+    // BACKEND_URL ka istemal karke poora image URL banao
     const absoluteImageUrl = relativeImagePath.startsWith("http")
       ? relativeImagePath
       : `${backendUrl}${relativeImagePath.startsWith("/") ? "" : "/"}${relativeImagePath}`;
@@ -106,8 +96,8 @@ const handleShareRequest = async (req, res, type) => {
     const html = generateShareHTML({
       name: itemName,
       description: itemDescription,
-      image: absoluteImageUrl, // Pass the correctly formed absolute URL
-      url: frontendUrl,        // Pass the frontend URL for redirection and meta tags
+      image: absoluteImageUrl, // Yahan sahi URL pass hoga
+      url: frontendUrl,        // Redirect ke liye frontend ka URL pass hoga
       price: itemPrice,
     });
 
@@ -116,9 +106,9 @@ const handleShareRequest = async (req, res, type) => {
     res.send(html);
 
   } catch (error) {
-    console.error(`Share route error for ${type}/${slug}:`, error);
-    const homeUrl = process.env.FRONTEND_URL || "https://houseplanfiles.com";
-    res.status(500).send(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${homeUrl}"></head><body>Server error. Redirecting home...</body></html>`);
+    console.error(`Share route error for ${slug}:`, error);
+    // Error aane par bhi frontend par redirect kar do
+    res.redirect(frontendUrl);
   }
 };
 
