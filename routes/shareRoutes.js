@@ -1,10 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const Product = require("../models/productModel");
-// ⭐ FIX 1: ProfessionalPlan model ko bhi import karein
 const ProfessionalPlan = require("../models/professionalPlanModel");
 
-// Is function mein koi badlav nahi hai
 const generateShareHTML = (data) => {
   const { name, description, image, url } = data;
   const cleanDescription = description
@@ -60,7 +58,6 @@ const handleShareRequest = async (req, res, type) => {
 
   try {
     let item;
-    // ⭐ FIX 1: 'type' ke aadhar par sahi model se data fetch karein
     if (type === "product") {
       item = await Product.findById(id);
     } else if (type === "professional-plan") {
@@ -78,23 +75,18 @@ const handleShareRequest = async (req, res, type) => {
       item.Description ||
       "Find and purchase architectural house plans for your dream home.";
 
-    // ⭐ FIX 2: Image ka URL backend ke URL se banayein, frontend ke nahi
     let absoluteImageUrl;
     const dbImage =
       item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : null);
 
-    // Ye aapka backend ka public URL hai
     const backendUrl =
       process.env.VITE_BACKEND_URL || "https://architect-backend.vercel.app";
 
     if (!dbImage) {
-      // Agar koi image nahi hai to default image use karein
       absoluteImageUrl = `${frontendUrl}/default-house-plan.jpg`; 
     } else if (dbImage.startsWith("http")) {
-      // Agar pehle se hi poora URL hai (S3, etc.), to koi badlav nahi
       absoluteImageUrl = dbImage;
     } else {
-      // Agar relative path hai, to backend ka URL jodein
       const cleanPath = dbImage.startsWith("/") ? dbImage.substring(1) : dbImage;
       absoluteImageUrl = `${backendUrl}/${cleanPath}`;
     }
@@ -118,5 +110,5 @@ const handleShareRequest = async (req, res, type) => {
 router.get("/product/:slug", (req, res) => handleShareRequest(req, res, "product"));
 router.get("/professional-plan/:slug", (req, res) => handleShareRequest(req, res, "professional-plan"));
 
-// ⭐ FIX 3: 'handleShareRequest' function ko export karein taaki server.js use kar sake
+// 'handleShareRequest' function ko export karein taaki server.js use kar sake
 module.exports = { router, handleShareRequest };
