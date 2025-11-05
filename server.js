@@ -35,9 +35,6 @@ dotenv.config();
 connectDB();
 
 const app = express();
-
-// ✅ CORS FIXED — aapke diye gaye configuration ke saath
-// Maine 5173 port bhi add kar diya hai, Vite (React) development ke liye aamtaur par use hota hai
 app.use(
   cors({
     origin: ["https://www.houseplanfiles.com", "http://localhost:3000", "http://localhost:5173"],
@@ -71,11 +68,9 @@ app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/seller-dashboard", sellerDashboardRoutes);
 
-// Share button ke special URL ke liye '.router' use karein
 app.use("/share", shareRoutes.router);
 
 
-// Social Share Middleware jo direct copy-paste kiye gaye URLs ke liye bots ko pakadta hai
 const socialShareMiddleware = async (req, res, next) => {
   const userAgent = req.headers["user-agent"] || "";
 
@@ -99,18 +94,14 @@ const socialShareMiddleware = async (req, res, next) => {
 };
 
 
-// --- FRONTEND SERVING LOGIC ---
 const __dirname = path.resolve();
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
-// Production environment mein React app ko serve karein
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "/frontend/dist")));
 
-  // Middleware ko React app serve karne se theek pehle use karein
   app.use(socialShareMiddleware);
 
-  // Koi bhi aur route jo API se match na ho, use React ka index.html bhej dein
   app.get("*", (req, res) =>
     res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"))
   );
@@ -121,7 +112,6 @@ if (process.env.NODE_ENV === "production") {
 }
 
 
-// --- ERROR HANDLING MIDDLEWARE (sabse aakhir mein) ---
 app.use(notFound);
 app.use(errorHandler);
 
