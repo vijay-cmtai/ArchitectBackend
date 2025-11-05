@@ -96,7 +96,6 @@ const socialShareMiddleware = async (req, res, next) => {
 
 
 // --- FRONTEND SERVING LOGIC (API routes ke baad) ---
-// ⭐ FIX: Yahan se 'const __dirname = path.resolve();' line hata di gayi hai
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
 // Production environment mein React app ko serve karein
@@ -106,7 +105,8 @@ if (process.env.NODE_ENV === "production") {
   // Middleware ko React app serve karne se theek pehle use karein
   app.use(socialShareMiddleware);
 
-  app.get("*", (req, res) =>
+  // ⭐ FIX: '*' ko regex /.*/ se replace kiya gaya hai taaki error na aaye
+  app.get(/.*/, (req, res) =>
     res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"))
   );
 } else {
