@@ -7,15 +7,13 @@ const Product = require("../models/productModel");
 const generateShareHTML = (data) => {
   const { name, description, image, url, price } = data;
 
-  // Clean description from HTML tags
   const cleanDescription = description
     .replace(/<[^>]*>/g, "")
     .substring(0, 160);
-
-  // Ensure absolute image URL
-  const absoluteImageUrl = image.startsWith("http")
-    ? image
-    : `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}${image}`;
+  
+  // Is function me ab kuch nahi badalna hai, kyunki hum absolute URL pehle hi bana kar bhejenge.
+  // Lekin fir bhi ek fallback rakhna aacha hai.
+  const absoluteImageUrl = image; 
 
   return `
 <!DOCTYPE html>
@@ -51,48 +49,18 @@ const generateShareHTML = (data) => {
     <meta name="twitter:image" content="${absoluteImageUrl}">
     <meta name="twitter:image:alt" content="${name}">
     
-    <!-- WhatsApp -->
-    <meta property="og:image:alt" content="${name}">
-    
     <!-- Redirect to actual page -->
     <meta http-equiv="refresh" content="0;url=${url}">
     <script>
-      setTimeout(function() {
-        window.location.href = "${url}";
-      }, 100);
+      setTimeout(function() { window.location.href = "${url}"; }, 100);
     </script>
     
     <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        margin: 0;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-      .loader {
-        text-align: center;
-      }
-      .spinner {
-        border: 4px solid rgba(255,255,255,0.3);
-        border-radius: 50%;
-        border-top: 4px solid white;
-        width: 40px;
-        height: 40px;
-        animation: spin 1s linear infinite;
-        margin: 0 auto 20px;
-      }
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      a {
-        color: white;
-        text-decoration: underline;
-      }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+      .loader { text-align: center; }
+      .spinner { border: 4px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 4px solid white; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      a { color: white; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -100,130 +68,68 @@ const generateShareHTML = (data) => {
       <div class="spinner"></div>
       <h2>${name}</h2>
       <p>Loading your plan...</p>
-      <p style="font-size: 14px; opacity: 0.8; margin-top: 20px;">
-        If you're not redirected, <a href="${url}">click here</a>
-      </p>
+      <p style="font-size: 14px; opacity: 0.8; margin-top: 20px;">If you're not redirected, <a href="${url}">click here</a></p>
     </div>
 </body>
 </html>
   `;
 };
 
-// Route for ADMIN products (from productSlice)
-router.get("/product/:slug", async (req, res) => {
+// Generic handler for both types of products to avoid repeating code
+const handleShareRequest = async (req, res, type) => {
   const slug = req.params.slug;
-  const productId = slug.split("-").pop();
+  const id = slug.split("-").pop();
+
+  const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/${type}/${slug}`;
+  const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"; // IMPORTANT: Use BACKEND_URL
 
   try {
-    const product = await Product.findById(productId);
+    const item = await Product.findById(id);
 
-    if (!product) {
-      const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/product/${slug}`;
-      return res.status(404).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta http-equiv="refresh" content="0;url=${frontendUrl}">
-        </head>
-        <body>Product not found. <a href="${frontendUrl}">Click here</a> if not redirected.</body>
-        </html>
-      `);
+    if (!item) {
+      return res.status(404).send(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${frontendUrl}"></head><body>Item not found. Redirecting...</body></html>`);
     }
 
-    const productName = product.name || product.Name || "House Plan";
-    const productDescription =
-      product.description || product.Description || "Premium house plan design";
-    const productImage =
-      product.mainImage ||
-      (product.Images ? product.Images.split(",")[0].trim() : "") ||
-      `${process.env.FRONTEND_URL}/default-image.jpg`;
-    const productPrice = product.salePrice || product.price || 0;
-    const productUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/product/${slug}`;
+    const itemName = item.name || item.planName || item.Name || "House Plan";
+    const itemDescription = item.description || item.Description || "Premium house plan design";
+    
+    // Get the relative image path from the database
+    const relativeImagePath = item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : "/default-image.jpg");
+    
+    // Create the full, absolute image URL using the BACKEND_URL
+    const absoluteImageUrl = relativeImagePath.startsWith("http")
+      ? relativeImagePath
+      : `${backendUrl}${relativeImagePath.startsWith("/") ? "" : "/"}${relativeImagePath}`;
+
+    const itemPrice = item.salePrice || item.price || 0;
 
     const html = generateShareHTML({
-      name: productName,
-      description: productDescription,
-      image: productImage,
-      url: productUrl,
-      price: productPrice,
+      name: itemName,
+      description: itemDescription,
+      image: absoluteImageUrl, // Pass the correctly formed absolute URL
+      url: frontendUrl,        // Pass the frontend URL for redirection and meta tags
+      price: itemPrice,
     });
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.send(html);
+
   } catch (error) {
-    console.error("Share route error:", error);
-    const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}`;
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta http-equiv="refresh" content="0;url=${frontendUrl}">
-      </head>
-      <body>Server error. <a href="${frontendUrl}">Click here</a> to go home.</body>
-      </html>
-    `);
+    console.error(`Share route error for ${type}/${slug}:`, error);
+    const homeUrl = process.env.FRONTEND_URL || "https://houseplanfiles.com";
+    res.status(500).send(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${homeUrl}"></head><body>Server error. Redirecting home...</body></html>`);
   }
+};
+
+// Route for ADMIN products
+router.get("/product/:slug", (req, res) => {
+  handleShareRequest(req, res, 'product');
 });
 
-// Route for PROFESSIONAL plans (from professionalPlanSlice)
-router.get("/professional-plan/:slug", async (req, res) => {
-  const slug = req.params.slug;
-  const planId = slug.split("-").pop();
-
-  try {
-    // Professional plans bhi Product model mein store hote hain
-    // Ya agar alag model hai to use import karein
-    const plan = await Product.findById(planId);
-
-    if (!plan) {
-      const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/professional-plan/${slug}`;
-      return res.status(404).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta http-equiv="refresh" content="0;url=${frontendUrl}">
-        </head>
-        <body>Plan not found. <a href="${frontendUrl}">Click here</a> if not redirected.</body>
-        </html>
-      `);
-    }
-
-    const planName =
-      plan.planName || plan.name || plan.Name || "Professional House Plan";
-    const planDescription =
-      plan.description || plan.Description || "Professional house plan design";
-    const planImage =
-      plan.mainImage ||
-      (plan.Images ? plan.Images.split(",")[0].trim() : "") ||
-      `${process.env.FRONTEND_URL}/default-image.jpg`;
-    const planPrice = plan.salePrice || plan.price || 0;
-    const planUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}/professional-plan/${slug}`;
-
-    const html = generateShareHTML({
-      name: planName,
-      description: planDescription,
-      image: planImage,
-      url: planUrl,
-      price: planPrice,
-    });
-
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.send(html);
-  } catch (error) {
-    console.error("Professional plan share route error:", error);
-    const frontendUrl = `${process.env.FRONTEND_URL || "https://houseplanfiles.com"}`;
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta http-equiv="refresh" content="0;url=${frontendUrl}">
-      </head>
-      <body>Server error. <a href="${frontendUrl}">Click here</a> to go home.</body>
-      </html>
-    `);
-  }
+// Route for PROFESSIONAL plans
+router.get("/professional-plan/:slug", (req, res) => {
+  handleShareRequest(req, res, 'professional-plan');
 });
 
 module.exports = router;
