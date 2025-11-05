@@ -2,15 +2,11 @@ const express = require("express");
 const router = express.Router();
 const Product = require("../models/productModel");
 
-// Helper function to generate HTML
 const generateShareHTML = (data) => {
   const { name, description, image, url, price } = data;
-
-  // Clean description from HTML tags
   const cleanDescription = description.replace(/<[^>]*>/g, "").substring(0, 160);
 
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -30,6 +26,7 @@ const generateShareHTML = (data) => {
     <meta property="og:image:secure_url" content="${image}">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
+    <meta property="og:image:type" content="image/jpeg">
     <meta property="og:site_name" content="House Plan Files">
     ${price ? `<meta property="product:price:amount" content="${price}">` : ""}
     ${price ? `<meta property="product:price:currency" content="INR">` : ""}
@@ -40,64 +37,79 @@ const generateShareHTML = (data) => {
     <meta name="twitter:title" content="${name}">
     <meta name="twitter:description" content="${cleanDescription}">
     <meta name="twitter:image" content="${image}">
+    <meta name="twitter:image:alt" content="${name}">
     
-    <!-- Redirect to actual page -->
+    <!-- WhatsApp -->
+    <meta property="og:image:alt" content="${name}">
+    
+    <!-- Redirect -->
     <meta http-equiv="refresh" content="0;url=${url}">
-    <script>setTimeout(() => window.location.href = "${url}", 50);</script>
+    <script>setTimeout(() => window.location.href = "${url}", 100);</script>
     
     <style>
-      body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; }
-      .loader { text-align: center; color: #333; }
+      body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+      .loader { text-align: center; }
+      .spinner { border: 4px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 4px solid white; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      a { color: white; text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="loader">
+      <div class="spinner"></div>
       <h2>${name}</h2>
-      <p>Redirecting to the plan page...</p>
-      <p style="font-size: 14px;"><a href="${url}">Click here</a> if you are not redirected.</p>
+      <p>Loading plan...</p>
+      <p style="font-size: 14px; opacity: 0.8; margin-top: 20px;">If not redirected, <a href="${url}">click here</a></p>
     </div>
 </body>
-</html>
-  `;
+</html>`;
 };
 
-// Generic handler for both types of products
 const handleShareRequest = async (req, res, type) => {
   const { slug } = req.params;
   const id = slug.split("-").pop();
 
-  // Redirect ke liye FRONTEND URL ka istemal hoga
-  const frontendUrl = `${process.env.FRONTEND_URL || "https://www.houseplanfiles.com"}/${type}/${slug}`;
-  
-  // Image banane ke liye BACKEND URL ka istemal hoga
-  const backendUrl = process.env.BACKEND_URL || "https://architect-backend.vercel.app";
+  // Frontend URL for redirect
+  const frontendUrl = process.env.FRONTEND_URL || "https://www.houseplanfiles.com";
+  const productUrl = `${frontendUrl}/${type}/${slug}`;
 
   try {
     const item = await Product.findById(id);
 
-    // Agar item nahi milta, to seedha frontend par redirect kar do
     if (!item) {
-      return res.redirect(frontendUrl);
+      return res.redirect(productUrl);
     }
 
     const itemName = item.name || item.Name || "House Plan";
     const itemDescription = item.description || item.Description || "Find and purchase architectural house plans for your dream home.";
-    
-    // Database se relative image path nikalo
-    const relativeImagePath = item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : "/default-logo.png"); // Ek default logo rakhein
-    
-    // BACKEND_URL ka istemal karke poora image URL banao
-    const absoluteImageUrl = relativeImagePath.startsWith("http")
-      ? relativeImagePath
-      : `${backendUrl}${relativeImagePath.startsWith("/") ? "" : "/"}${relativeImagePath}`;
-
     const itemPrice = item.salePrice || item.price || 0;
+
+    // ===== IMAGE URL GENERATION - YEH HAI IMPORTANT PART =====
+    let absoluteImageUrl;
+    
+    // Step 1: Get image from database
+    const dbImage = item.mainImage || (item.Images ? item.Images.split(",")[0].trim() : null);
+
+    if (!dbImage) {
+      // No image in database - use default
+      absoluteImageUrl = `${frontendUrl}/default-house-plan.jpg`;
+    } else if (dbImage.startsWith("http://") || dbImage.startsWith("https://")) {
+      // Already absolute URL (e.g., S3, Cloudinary)
+      absoluteImageUrl = dbImage;
+    } else {
+      // Relative URL - convert to absolute
+      // Remove leading slash if exists, then add frontend URL
+      const cleanPath = dbImage.startsWith("/") ? dbImage.substring(1) : dbImage;
+      absoluteImageUrl = `${frontendUrl}/${cleanPath}`;
+    }
+
+    console.log(`📸 Image URL for ${slug}: ${absoluteImageUrl}`);
 
     const html = generateShareHTML({
       name: itemName,
       description: itemDescription,
-      image: absoluteImageUrl, // Yahan sahi URL pass hoga
-      url: frontendUrl,        // Redirect ke liye frontend ka URL pass hoga
+      image: absoluteImageUrl,
+      url: productUrl,
       price: itemPrice,
     });
 
@@ -106,20 +118,12 @@ const handleShareRequest = async (req, res, type) => {
     res.send(html);
 
   } catch (error) {
-    console.error(`Share route error for ${slug}:`, error);
-    // Error aane par bhi frontend par redirect kar do
-    res.redirect(frontendUrl);
+    console.error(`❌ Share route error for ${slug}:`, error);
+    res.redirect(productUrl);
   }
 };
 
-// Route for ADMIN products
-router.get("/product/:slug", (req, res) => {
-  handleShareRequest(req, res, 'product');
-});
-
-// Route for PROFESSIONAL plans
-router.get("/professional-plan/:slug", (req, res) => {
-  handleShareRequest(req, res, 'professional-plan');
-});
+router.get("/product/:slug", (req, res) => handleShareRequest(req, res, "product"));
+router.get("/professional-plan/:slug", (req, res) => handleShareRequest(req, res, "professional-plan"));
 
 module.exports = router;
