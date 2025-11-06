@@ -2,14 +2,12 @@ const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel.js");
 const jwt = require("jsonwebtoken");
 
-// Helper function to generate JWT token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "30d",
   });
 };
 
-// Helper function to validate fields based on user role
 const validateRoleFields = (role, body) => {
   const {
     name,
@@ -20,6 +18,7 @@ const validateRoleFields = (role, body) => {
     materialType,
     companyName,
     experience,
+    contractorType,
   } = body;
   switch (role) {
     case "user":
@@ -70,6 +69,7 @@ const validateRoleFields = (role, body) => {
         city,
         experience,
         profession,
+        contractorType: contractorType || "Normal",
         isApproved: false,
         status: "Pending",
       };
@@ -81,14 +81,10 @@ const validateRoleFields = (role, body) => {
   }
 };
 
-// Helper function to get the primary display name for a user
 const getUserDisplayName = (user) => {
   return user.name || user.businessName || user.companyName;
 };
 
-// @desc    Register a new user
-// @route   POST /api/users/register
-// @access  Public
 const registerUser = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
   if (!email || !password || !phone || !role) {
@@ -107,8 +103,6 @@ const registerUser = asyncHandler(async (req, res) => {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
-    // <<< YAHAN BADLAAV KIYA GAYA HAI: .path ko .location se badla gaya >>>
-    // .location S3 se file ka URL deta hai
     if (req.files) {
       if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
       if (req.files.businessCertification)
@@ -117,7 +111,6 @@ const registerUser = asyncHandler(async (req, res) => {
       if (req.files.shopImage)
         userData.shopImageUrl = req.files.shopImage[0].location;
     }
-    // <<< BADLAAV KHATAM >>>
 
     const user = await User.create(userData);
     res.status(201).json({
@@ -135,9 +128,6 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Create a new user by an Admin
-// @route   POST /api/users/admin/create
-// @access  Private/Admin
 const createUserByAdmin = asyncHandler(async (req, res) => {
   const { email, password, phone, role } = req.body;
   if (!email || !password || !phone || !role) {
@@ -153,10 +143,9 @@ const createUserByAdmin = asyncHandler(async (req, res) => {
   try {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
-    userData.isApproved = true; // Admin dwara banaye gaye user hamesha approved hote hain
+    userData.isApproved = true;
     userData.status = "Approved";
 
-    // <<< YAHAN BHI FILE HANDLING ADD KI GAYI HAI CONSISTENCY KE LIYE >>>
     if (req.files) {
       if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
       if (req.files.businessCertification)
@@ -165,7 +154,6 @@ const createUserByAdmin = asyncHandler(async (req, res) => {
       if (req.files.shopImage)
         userData.shopImageUrl = req.files.shopImage[0].location;
     }
-    // <<< BADLAAV KHATAM >>>
 
     const user = await User.create(userData);
     res.status(201).json({
@@ -180,9 +168,6 @@ const createUserByAdmin = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Auth user & get token
-// @route   POST /api/users/login
-// @access  Public
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -215,6 +200,7 @@ const loginUser = asyncHandler(async (req, res) => {
       experience: user.experience,
       city: user.city,
       photoUrl: user.photoUrl,
+      contractorType: user.contractorType,
       token: generateToken(user._id),
     });
   } else {
@@ -223,9 +209,6 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Get all users
-// @route   GET /api/users
-// @access  Private/Admin
 const getAllUsers = asyncHandler(async (req, res) => {
   const { role, status, page = 1, limit = 10 } = req.query;
   let filter = { role: { $ne: "admin" } };
@@ -250,9 +233,6 @@ const getAllUsers = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get user by ID
-// @route   GET /api/users/:id
-// @access  Private/Admin
 const getUserById = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -267,9 +247,6 @@ const getUserById = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Update user by ID
-// @route   PUT /api/users/:id
-// @access  Private/Admin
 const updateUser = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -282,7 +259,6 @@ const updateUser = asyncHandler(async (req, res) => {
     throw new Error("User not found");
   }
 
-  // Security Check: Allow update only if the requester is an Admin OR is updating their OWN profile.
   if (
     req.user.role !== "admin" &&
     user._id.toString() !== req.user._id.toString()
@@ -291,20 +267,17 @@ const updateUser = asyncHandler(async (req, res) => {
     throw new Error("Not authorized to update this user's profile.");
   }
 
-  // Update common fields
   user.email = req.body.email || user.email;
   user.phone = req.body.phone || user.phone;
 
-  // Update password if a new one is provided
   if (req.body.password) {
     if (req.body.password.length < 6) {
       res.status(400);
       throw new Error("Password must be at least 6 characters long");
     }
-    user.password = req.body.password; // Mongoose pre-save hook will hash it automatically
+    user.password = req.body.password;
   }
 
-  // Update file uploads (using .location for S3)
   if (req.files) {
     if (req.files.photo) user.photoUrl = req.files.photo[0].location;
     if (req.files.shopImage)
@@ -314,7 +287,6 @@ const updateUser = asyncHandler(async (req, res) => {
         req.files.businessCertification[0].location;
   }
 
-  // Role-specific field updates
   switch (user.role) {
     case "user":
     case "admin":
@@ -339,10 +311,12 @@ const updateUser = asyncHandler(async (req, res) => {
       user.city = req.body.city || user.city;
       user.experience = req.body.experience || user.experience;
       user.profession = req.body.profession || user.profession;
+      if (req.body.contractorType) {
+        user.contractorType = req.body.contractorType;
+      }
       break;
   }
 
-  // Admin-only fields for changing status
   if (req.user.role === "admin") {
     if (req.body.status) {
       user.status = req.body.status;
@@ -356,7 +330,6 @@ const updateUser = asyncHandler(async (req, res) => {
 
   const updatedUser = await user.save();
 
-  // Send back updated info (without password)
   res.json({
     _id: updatedUser._id,
     name: getUserDisplayName(updatedUser),
@@ -375,13 +348,11 @@ const updateUser = asyncHandler(async (req, res) => {
     photoUrl: updatedUser.photoUrl,
     shopImageUrl: updatedUser.shopImageUrl,
     businessCertificationUrl: updatedUser.businessCertificationUrl,
-    token: generateToken(updatedUser._id), 
+    contractorType: updatedUser.contractorType,
+    token: generateToken(updatedUser._id),
   });
 });
 
-// @desc    Delete user by ID
-// @route   DELETE /api/users/:id
-// @access  Private/Admin
 const deleteUser = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -408,9 +379,6 @@ const deleteUser = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get user statistics
-// @route   GET /api/users/stats
-// @access  Private/Admin
 const getUserStats = asyncHandler(async (req, res) => {
   const stats = await User.aggregate([
     { $match: { role: { $ne: "admin" } } },
@@ -427,9 +395,6 @@ const getUserStats = asyncHandler(async (req, res) => {
   res.json({ totalUsers, breakdown: stats });
 });
 
-// @desc    Get a single seller's public profile by ID
-// @route   GET /api/users/store/:sellerId
-// @access  Public
 const getSellerPublicProfile = asyncHandler(async (req, res) => {
   const seller = await User.findById(req.params.sellerId).select(
     "name businessName shopImageUrl city"
