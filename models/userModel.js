@@ -12,32 +12,27 @@ const userSchema = mongoose.Schema(
       enum: ["user", "professional", "seller", "Contractor", "admin"],
     },
     name: { type: String },
-
-    // Approval Status
     isApproved: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["Pending", "Approved", "Rejected"],
       default: "Pending",
     },
-
-    // Profile Image
     photoUrl: { type: String },
-
-    // Fields for Professional, Seller & Contractor
     profession: { type: String },
     businessCertificationUrl: { type: String },
     shopImageUrl: { type: String },
     city: { type: String },
     address: { type: String },
-    experience: { type: String }, // Added for Professional and Contractor
-
-    // For Seller
+    experience: { type: String },
     businessName: { type: String },
     materialType: { type: String },
-
-    // For Contractor
     companyName: { type: String },
+    contractorType: {
+      type: String,
+      enum: ["Normal", "Premium"],
+      default: "Normal",
+    },
   },
   {
     timestamps: true,
