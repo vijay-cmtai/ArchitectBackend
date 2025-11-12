@@ -27,38 +27,27 @@ const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
 const mediaRoutes = require("./routes/mediaRoutes.js");
 const shareRoutes = require("./routes/shareRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// ✅ FIXED CORS — placed at top, includes live + local domains
+// ✅ CORS FIXED — only this part changed
 app.use(
   cors({
-    origin: [
-      "https://www.houseplanfiles.com",
-      "https://houseplanfiles.com",
-      "http://localhost:3000",
-      "http://localhost:8080",
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    origin: ["https://www.houseplanfiles.com", "http://localhost:3000"],
     credentials: true,
   })
 );
 
-// ✅ Handle preflight requests globally
-app.options("*", cors());
-
 app.use(express.json());
+
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
 
-// ✅ API routes
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/professional-plans", professionalPlanRoutes);
@@ -86,4 +75,5 @@ app.use(notFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
