@@ -1,6 +1,8 @@
 const asyncHandler = require("express-async-handler");
 const User = require("../models/userModel.js");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const { sendEmail } = require("../utils/mailer.js");
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -408,6 +410,86 @@ const getSellerPublicProfile = asyncHandler(async (req, res) => {
   }
 });
 
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    return res.json({
+      message: "Password reset link has been sent to your email.",
+    });
+  }
+
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  user.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  user.passwordResetExpires = Date.now() + 10 * 60 * 1000;
+
+  await user.save({ validateBeforeSave: false });
+
+  try {
+    const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    const message = `
+      <h1>You have requested a password reset</h1>
+      <p>Please go to this link to reset your password:</p>
+      <a href="${resetURL}" clicktracking=off>${resetURL}</a>
+      <p>This link will expire in 10 minutes.</p>
+      <p>If you did not request this, please ignore this email.</p>
+    `;
+
+    await sendEmail({
+      to: user.email,
+      subject: "ArchHome - Password Reset Request",
+      html: message,
+    });
+
+    res.json({ message: "Password reset link has been sent to your email." });
+  } catch (error) {
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.status(500);
+    throw new Error("Email could not be sent. Please try again later.");
+  }
+});
+
+const resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  const { token } = req.params;
+
+  if (!password || password.length < 6) {
+    res.status(400);
+    throw new Error(
+      "Password is required and must be at least 6 characters long."
+    );
+  }
+
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    res.status(400);
+    throw new Error("Token is invalid or has expired.");
+  }
+
+  user.password = password;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+
+  await user.save();
+
+  res.json({ message: "Password has been reset successfully. Please login." });
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -418,4 +500,6 @@ module.exports = {
   getUserStats,
   createUserByAdmin,
   getSellerPublicProfile,
+  forgotPassword,
+  resetPassword,
 };
