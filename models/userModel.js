@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const Notification = require("./notificationModel");
 
 const userSchema = mongoose.Schema(
   {
@@ -33,6 +34,8 @@ const userSchema = mongoose.Schema(
       enum: ["Normal", "Premium"],
       default: "Normal",
     },
+    passwordResetToken: String,
+    passwordResetExpires: Date,
   },
   {
     timestamps: true,
@@ -49,6 +52,21 @@ userSchema.pre("save", async function (next) {
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+});
+
+userSchema.post("save", async function (doc, next) {
+  if (this.isNew) {
+    try {
+      await Notification.create({
+        message: `New ${doc.role} registered: ${doc.name || doc.email}`,
+        type: "NEW_USER",
+        link: "/admin/users",
+      });
+    } catch (error) {
+      console.error("Failed to create notification for new user:", error);
+    }
+  }
+  next();
 });
 
 const User = mongoose.model("User", userSchema);
