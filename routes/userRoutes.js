@@ -9,6 +9,8 @@ const {
   createUserByAdmin,
   getUserStats,
   getSellerPublicProfile,
+  forgotPassword,
+  resetPassword,
 } = require("../controllers/userController");
 
 const upload = require("../middleware/uploadMiddleware");
@@ -24,6 +26,8 @@ const handleUserUploads = upload.fields([
 
 router.post("/register", handleUserUploads, registerUser);
 router.post("/login", loginUser);
+router.post("/forgot-password", forgotPassword);
+router.put("/reset-password/:token", resetPassword);
 router.get("/store/:sellerId", getSellerPublicProfile);
 router.route("/").get(getAllUsers);
 
