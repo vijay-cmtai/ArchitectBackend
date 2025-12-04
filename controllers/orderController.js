@@ -246,7 +246,8 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  const merchantTransactionId = `MT${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  // Generate unique transaction ID (must be unique for each transaction)
+  const merchantTransactionId = `HPF${Date.now()}`;
   order.merchantTransactionId = merchantTransactionId;
   await order.save();
 
@@ -257,36 +258,54 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   phoneNumber = phoneNumber.replace(/\D/g, "");
   if (phoneNumber.length !== 10) phoneNumber = "9999999999";
 
+  // URLs - For local testing, you MUST use ngrok or deploy to production
+  const frontendUrl = process.env.FRONTEND_URL;
+  const backendUrl = process.env.BACKEND_URL;
+
+  // Validate URLs are not localhost for production
+  if (frontendUrl.includes('localhost') || backendUrl.includes('localhost')) {
+    console.warn('⚠️ WARNING: Using localhost URLs with production PhonePe API will fail!');
+    console.warn('Please use ngrok or deploy to production server.');
+  }
+
   const payload = {
     merchantId: process.env.PHONEPE_MERCHANT_ID,
     merchantTransactionId,
-    merchantUserId: req.user ? req.user._id.toString() : `GUEST${Date.now()}`,
+    merchantUserId: req.user ? `U${req.user._id.toString().slice(-10)}` : `GUEST${Date.now()}`,
     amount: amountInPaise,
-    redirectUrl: `${process.env.FRONTEND_URL}/order-success/${order.orderId}`,
-    redirectMode: "REDIRECT",
-    callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-callback`,
+    redirectUrl: `${frontendUrl}/order-success/${order.orderId}`,
+    redirectMode: "POST",
+    callbackUrl: `${backendUrl}/api/orders/phonepe-callback`,
     mobileNumber: phoneNumber,
     paymentInstrument: {
       type: "PAY_PAGE",
     },
   };
 
-  console.log("PhonePe Payload:", JSON.stringify(payload, null, 2));
+  console.log("📱 PhonePe Payment Request:");
+  console.log("Merchant ID:", process.env.PHONEPE_MERCHANT_ID);
+  console.log("Transaction ID:", merchantTransactionId);
+  console.log("Amount:", amountInPaise, "paise (₹", order.totalPrice, ")");
+  console.log("Redirect URL:", payload.redirectUrl);
+  console.log("Callback URL:", payload.callbackUrl);
 
   const payloadString = JSON.stringify(payload);
   const base64Payload = Buffer.from(payloadString).toString("base64");
 
-  // Create checksum
-  const stringToHash =
-    base64Payload + "/pg/v1/pay" + process.env.PHONEPE_SALT_KEY;
+  // Production API uses different endpoint path
+  const apiEndpoint = "/pg/v1/pay";
+  const stringToHash = base64Payload + apiEndpoint + process.env.PHONEPE_SALT_KEY;
   const sha256 = crypto.createHash("sha256").update(stringToHash).digest("hex");
   const xVerify = sha256 + "###" + process.env.PHONEPE_SALT_INDEX;
 
-  console.log("X-VERIFY header:", xVerify);
+  console.log("X-VERIFY:", xVerify.substring(0, 20) + "...");
+
+  const apiUrl = `${process.env.PHONEPE_API_URL}${apiEndpoint}`;
+  console.log("API URL:", apiUrl);
 
   const options = {
     method: "POST",
-    url: `${process.env.PHONEPE_API_URL}/pg/v1/pay`,
+    url: apiUrl,
     headers: {
       accept: "application/json",
       "Content-Type": "application/json",
@@ -299,30 +318,38 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
 
   try {
     const response = await axios.request(options);
-    console.log("PhonePe Response:", JSON.stringify(response.data, null, 2));
+    console.log("✅ PhonePe Response:", JSON.stringify(response.data, null, 2));
 
     if (response.data && response.data.success) {
       const redirectUrl =
         response.data.data?.instrumentResponse?.redirectInfo?.url;
       if (redirectUrl) {
+        console.log("🔗 Payment URL:", redirectUrl);
         res.json({ redirectUrl });
       } else {
+        console.error("❌ No redirect URL in response");
         res.status(500).json({
           message: "PhonePe did not return a redirect URL",
           details: response.data,
         });
       }
     } else {
+      console.error("❌ PhonePe request failed:", response.data);
       res.status(500).json({
         message: response.data.message || "PhonePe payment creation failed",
+        code: response.data.code,
         details: response.data,
       });
     }
   } catch (error) {
-    console.error("PhonePe API Error:", error.response?.data || error.message);
+    console.error("❌ PhonePe API Error:");
+    console.error("Status:", error.response?.status);
+    console.error("Data:", error.response?.data);
+    console.error("Message:", error.message);
+    
     res.status(500).json({
       message: "Failed to create PhonePe payment",
-      error: error.response?.data || error.message,
+      error: error.response?.data || { message: error.message },
     });
   }
 });
