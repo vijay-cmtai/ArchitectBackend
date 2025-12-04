@@ -234,6 +234,7 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
 });
 
 const createPhonePePayment = asyncHandler(async (req, res) => {
+  // Validate environment variables
   if (!process.env.PHONEPE_MERCHANT_ID || !process.env.PHONEPE_SALT_KEY) {
     res.status(500);
     throw new Error("PhonePe payment gateway not configured");
@@ -245,11 +246,13 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  const merchantTransactionId = `M-${order._id}-${Date.now()}`;
+  const merchantTransactionId = `MT${Date.now()}${Math.floor(Math.random() * 1000)}`;
   order.merchantTransactionId = merchantTransactionId;
   await order.save();
 
   const amountInPaise = Math.round(order.totalPrice * 100);
+
+  // Clean phone number
   let phoneNumber = order.shippingAddress.phone || "9999999999";
   phoneNumber = phoneNumber.replace(/\D/g, "");
   if (phoneNumber.length !== 10) phoneNumber = "9999999999";
@@ -257,58 +260,69 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   const payload = {
     merchantId: process.env.PHONEPE_MERCHANT_ID,
     merchantTransactionId,
-    merchantUserId: req.user ? req.user._id.toString() : `GUEST-${order._id}`,
+    merchantUserId: req.user ? req.user._id.toString() : `GUEST${Date.now()}`,
     amount: amountInPaise,
     redirectUrl: `${process.env.FRONTEND_URL}/order-success/${order.orderId}`,
     redirectMode: "REDIRECT",
     callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-callback`,
     mobileNumber: phoneNumber,
-    paymentInstrument: { type: "PAY_PAGE" },
+    paymentInstrument: {
+      type: "PAY_PAGE",
+    },
   };
+
+  console.log("PhonePe Payload:", JSON.stringify(payload, null, 2));
 
   const payloadString = JSON.stringify(payload);
   const base64Payload = Buffer.from(payloadString).toString("base64");
+
+  // Create checksum
   const stringToHash =
     base64Payload + "/pg/v1/pay" + process.env.PHONEPE_SALT_KEY;
   const sha256 = crypto.createHash("sha256").update(stringToHash).digest("hex");
   const xVerify = sha256 + "###" + process.env.PHONEPE_SALT_INDEX;
 
+  console.log("X-VERIFY header:", xVerify);
+
   const options = {
-    method: "post",
+    method: "POST",
     url: `${process.env.PHONEPE_API_URL}/pg/v1/pay`,
     headers: {
       accept: "application/json",
       "Content-Type": "application/json",
       "X-VERIFY": xVerify,
     },
-    data: { request: base64Payload },
+    data: {
+      request: base64Payload,
+    },
   };
 
   try {
     const response = await axios.request(options);
+    console.log("PhonePe Response:", JSON.stringify(response.data, null, 2));
+
     if (response.data && response.data.success) {
       const redirectUrl =
         response.data.data?.instrumentResponse?.redirectInfo?.url;
       if (redirectUrl) {
         res.json({ redirectUrl });
       } else {
-        res
-          .status(500)
-          .json({ message: "PhonePe did not return a redirect URL" });
+        res.status(500).json({
+          message: "PhonePe did not return a redirect URL",
+          details: response.data,
+        });
       }
     } else {
       res.status(500).json({
         message: response.data.message || "PhonePe payment creation failed",
+        details: response.data,
       });
     }
   } catch (error) {
-    console.error(
-      "PhonePe API Error:",
-      error.response ? error.response.data : error.message
-    );
+    console.error("PhonePe API Error:", error.response?.data || error.message);
     res.status(500).json({
       message: "Failed to create PhonePe payment",
-      error: error.response ? error.response.data : error.message,
+      error: error.response?.data || error.message,
     });
   }
 });
