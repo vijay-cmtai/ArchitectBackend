@@ -2,7 +2,6 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
-const querystring = require("querystring"); // ✅ Native Node module use kar rahe hain formatting ke liye
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
@@ -59,61 +58,25 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * ✅ DEBUG MODE: Get PhonePe OAuth Access Token
- * Ye function ab exact error fekega taaki hume pata chale issue kya hai
+ * ✅ CORRECTED: PhonePe X-VERIFY Checksum Generator
+ * PhonePe uses SHA256 checksum authentication, NOT OAuth
  */
-const getPhonePeAuthToken = async () => {
-  const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
-
-  // Using querystring to guarantee application/x-www-form-urlencoded
-  const payload = querystring.stringify({
-    grant_type: "client_credentials",
-    client_id: process.env.PHONEPE_CLIENT_ID ? process.env.PHONEPE_CLIENT_ID.trim() : "",
-    client_secret: process.env.PHONEPE_CLIENT_SECRET ? process.env.PHONEPE_CLIENT_SECRET.trim() : "",
-  });
-
-  console.log("🔄 [PhonePe Auth] Requesting Token...");
-  console.log("📍 URL:", tokenUrl);
-  console.log("🔑 Client ID (First 5 chars):", process.env.PHONEPE_CLIENT_ID?.substring(0, 5));
-
-  try {
-    const response = await axios.post(tokenUrl, payload, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json"
-      },
-    });
-
-    console.log("✅ [PhonePe Auth] Success");
-    return response.data.access_token;
-
-  } catch (error) {
-    console.error("❌ [PhonePe Auth] FAILED");
-    
-    let errorMessage = "Failed to authenticate with PhonePe";
-    
-    if (error.response) {
-      // Server responded with a status code outside the 2xx range
-      console.error("⚠️ Status:", error.response.status);
-      console.error("⚠️ Data:", JSON.stringify(error.response.data, null, 2));
-      
-      if (error.response.status === 403) {
-        errorMessage = `PHONEPE 403 FORBIDDEN (IP Blocked). Vercel IP is not allowed. Response: ${JSON.stringify(error.response.data)}`;
-      } else if (error.response.status === 401) {
-        errorMessage = `PHONEPE 401 UNAUTHORIZED (Wrong ID/Secret). Response: ${JSON.stringify(error.response.data)}`;
-      } else {
-        errorMessage = `PhonePe Auth Error (${error.response.status}): ${JSON.stringify(error.response.data)}`;
-      }
-    } else if (error.request) {
-      console.error("⚠️ No Response received from PhonePe");
-      errorMessage = "No response from PhonePe Server (Network Issue)";
-    } else {
-      console.error("⚠️ Setup Error:", error.message);
-      errorMessage = error.message;
-    }
-
-    throw new Error(errorMessage);
+const generatePhonePeChecksum = (payload, endpoint) => {
+  const saltKey = process.env.PHONEPE_SALT_KEY;
+  const saltIndex = process.env.PHONEPE_SALT_INDEX || "1";
+  
+  if (!saltKey) {
+    throw new Error("PHONEPE_SALT_KEY is not configured");
   }
+  
+  // Create checksum: SHA256(base64Payload + endpoint + saltKey) + ### + saltIndex
+  const stringToHash = payload + endpoint + saltKey;
+  const sha256Hash = crypto
+    .createHash("sha256")
+    .update(stringToHash)
+    .digest("hex");
+  
+  return sha256Hash + "###" + saltIndex;
 };
 
 // --- STANDARD ORDER CONTROLLERS ---
@@ -297,10 +260,10 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PHONEPE V2 CONTROLLERS ---
+// --- PHONEPE CONTROLLERS (CORRECTED - X-VERIFY METHOD) ---
 
 /**
- * 1. Create PhonePe Payment (V2 with OAuth)
+ * ✅ 1. Create PhonePe Payment (Using X-VERIFY Checksum)
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
@@ -309,10 +272,9 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  // 1. Get Access Token (Errors will be caught by asyncHandler and sent to frontend)
-  const accessToken = await getPhonePeAuthToken();
+  console.log("🔄 [PhonePe] Creating payment for order:", order._id);
 
-  // 2. Prepare Data
+  // Prepare Payment Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
 
@@ -333,8 +295,18 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     },
   };
 
-  const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
-  const base64EncodedPayload = bufferObj.toString("base64");
+  // Encode payload to Base64
+  const base64EncodedPayload = Buffer.from(
+    JSON.stringify(payloadData),
+    "utf8"
+  ).toString("base64");
+
+  // Generate X-VERIFY checksum
+  const endpoint = "/pg/v1/pay";
+  const xVerify = generatePhonePeChecksum(base64EncodedPayload, endpoint);
+
+  console.log("📦 [PhonePe] Payload prepared");
+  console.log("🔑 [PhonePe] X-VERIFY generated");
 
   try {
     const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
@@ -347,11 +319,12 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+          "X-VERIFY": xVerify,
         },
       }
     );
+
+    console.log("✅ [PhonePe] API Response:", response.data);
 
     if (response.data.success) {
       order.merchantTransactionId = merchantTransactionId;
@@ -362,38 +335,45 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
         merchantTransactionId: merchantTransactionId,
       });
     } else {
-      console.error("❌ PhonePe Payment Creation Failed:", response.data);
+      console.error("❌ [PhonePe] Payment Creation Failed:", response.data);
       res.status(500);
       throw new Error(response.data.message || "PhonePe initiation failed");
     }
   } catch (error) {
     console.error(
-      "❌ PhonePe API Error:",
+      "❌ [PhonePe] API Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500);
-    throw new Error(error.response?.data?.message || "Payment initiation failed");
+    throw new Error(
+      error.response?.data?.message || "Payment initiation failed"
+    );
   }
 });
 
 /**
- * 2. Check Payment Status
+ * ✅ 2. Check Payment Status (Using X-VERIFY Checksum)
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
-  try {
-    const accessToken = await getPhonePeAuthToken();
+  console.log("🔄 [PhonePe] Checking status for:", merchantTransactionId);
 
-    const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+  try {
+    // Generate endpoint and checksum
+    const endpoint = `/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+    const xVerify = generatePhonePeChecksum("", endpoint);
+
+    const statusUrl = `https://api.phonepe.com/apis/hermes${endpoint}`;
 
     const response = await axios.get(statusUrl, {
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        "X-VERIFY": xVerify,
       },
     });
+
+    console.log("✅ [PhonePe] Status Response:", response.data);
 
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
       const order = await Order.findById(merchantTransactionId);
@@ -403,6 +383,8 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
           id: response.data.data.transactionId,
           method: "PhonePe",
         });
+        console.log(`✅ [PhonePe] Order ${merchantTransactionId} marked as paid`);
+        
         return res.json({
           success: true,
           message: "Payment Successful",
@@ -414,21 +396,29 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error(
-      "❌ PhonePe Status Check Error:",
+      "❌ [PhonePe] Status Check Error:",
       error.response ? error.response.data : error.message
     );
-    res.status(500).json({ message: "Status check failed" });
+    res.status(500).json({ 
+      message: "Status check failed",
+      error: error.response?.data || error.message 
+    });
   }
 });
 
 /**
- * 3. Handle Webhook
+ * ✅ 3. Handle PhonePe Webhook
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
+  console.log("🔔 [PhonePe] Webhook received");
+
   if (req.body.response) {
     try {
+      // Decode Base64 response
       const decodedBuffer = Buffer.from(req.body.response, "base64");
       const decodedBody = JSON.parse(decodedBuffer.toString("utf8"));
+
+      console.log("📨 [PhonePe] Webhook Data:", decodedBody);
 
       if (decodedBody.code === "PAYMENT_SUCCESS") {
         const orderId = decodedBody.data.merchantTransactionId;
@@ -439,13 +429,15 @@ const handlePhonePeWebhook = asyncHandler(async (req, res) => {
             id: decodedBody.data.transactionId,
             method: "PhonePe Webhook",
           });
-          console.log(`✅ Order ${orderId} updated via PhonePe Webhook`);
+          console.log(`✅ [PhonePe] Order ${orderId} updated via webhook`);
         }
       }
     } catch (err) {
-      console.error("❌ Webhook processing error:", err);
+      console.error("❌ [PhonePe] Webhook processing error:", err);
     }
   }
+
+  // Always respond with 200 to acknowledge webhook receipt
   res.status(200).send("OK");
 });
 
