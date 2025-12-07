@@ -58,27 +58,32 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * PhonePe Helper: Get OAuth Access Token
- * This replaces the old Salt/Checksum logic
+ * ✅ FIXED: Get PhonePe OAuth Access Token
+ * Must use 'application/x-www-form-urlencoded'
  */
 const getPhonePeAuthToken = async () => {
   try {
-    const response = await axios.post(
-      `${process.env.PHONEPE_API_URL}/v1/oauth/token`,
-      {
-        grant_type: "client_credentials",
-        client_id: process.env.PHONEPE_CLIENT_ID,
-        client_secret: process.env.PHONEPE_CLIENT_SECRET,
+    const params = new URLSearchParams();
+    params.append("grant_type", "client_credentials");
+    params.append("client_id", process.env.PHONEPE_CLIENT_ID);
+    params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+
+    // Note: URL structure is Base URL + /v1/oauth/token
+    const tokenUrl = `${process.env.PHONEPE_API_URL}/v1/oauth/token`;
+
+    const response = await axios.post(tokenUrl, params, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    });
+
+    console.log("✅ PhonePe Token Generated");
     return response.data.access_token;
   } catch (error) {
-    console.error("PhonePe Auth Error:", error.response?.data || error.message);
+    console.error(
+      "❌ PhonePe Auth Error:",
+      error.response ? error.response.data : error.message
+    );
     throw new Error("Failed to authenticate with PhonePe");
   }
 };
@@ -264,11 +269,10 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PHONEPE V2 CONTROLLERS (Client Credentials Flow) ---
+// --- PHONEPE V2 CONTROLLERS (Corrected) ---
 
 /**
  * 1. Create PhonePe Payment (V2 with OAuth)
- * Gets token -> Creates Payload -> Encodes Base64 -> Sends with Bearer Token
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
@@ -283,6 +287,10 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   // 2. Prepare Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
+  
+  // Format phone number (10 digits)
+  let phoneNumber = order.shippingAddress.phone || "9999999999";
+  phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
   const payloadData = {
     merchantId: process.env.PHONEPE_MERCHANT_ID,
@@ -292,7 +300,7 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     redirectUrl: `${process.env.FRONTEND_URL}/order/${order._id}`,
     redirectMode: "REDIRECT",
     callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
-    mobileNumber: order.shippingAddress.phone || "9999999999",
+    mobileNumber: phoneNumber,
     paymentInstrument: {
       type: "PAY_PAGE",
     },
@@ -302,17 +310,19 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
   const base64EncodedPayload = bufferObj.toString("base64");
 
-  // 4. Make Request (Note: No X-VERIFY checksum, using Bearer Token)
+  // 4. Make Request (API URL + /pg/v1/pay)
   try {
+    const payUrl = `${process.env.PHONEPE_API_URL}/pg/v1/pay`;
+    
     const response = await axios.post(
-      `${process.env.PHONEPE_API_URL}/pg/v1/pay`,
+      payUrl,
       {
         request: base64EncodedPayload,
       },
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`, // OAuth Token
+          Authorization: `Bearer ${accessToken}`, // Bearer Token from Step 1
           "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
         },
       }
@@ -327,16 +337,17 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
         merchantTransactionId: merchantTransactionId,
       });
     } else {
+      console.error("PhonePe Success False:", response.data);
       res.status(500);
       throw new Error(response.data.message || "PhonePe initiation failed");
     }
   } catch (error) {
     console.error(
-      "PhonePe Initiation Error:",
+      "❌ PhonePe Create Order Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500);
-    throw new Error("Payment initiation failed");
+    throw new Error("Payment initiation failed at PhonePe Gateway");
   }
 });
 
@@ -351,12 +362,14 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
     const accessToken = await getPhonePeAuthToken();
 
     // 2. Call Status API
+    const statusUrl = `${process.env.PHONEPE_API_URL}/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+
     const response = await axios.get(
-      `${process.env.PHONEPE_API_URL}/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`,
+      statusUrl,
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`, // OAuth Token
+          Authorization: `Bearer ${accessToken}`, 
           "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
         },
       }
@@ -381,7 +394,7 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error(
-      "PhonePe Status Check Error:",
+      "❌ PhonePe Status Check Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500).json({ message: "Status check failed" });
@@ -407,13 +420,14 @@ const handlePhonePeWebhook = asyncHandler(async (req, res) => {
             id: decodedBody.data.transactionId,
             method: "PhonePe Webhook",
           });
+          console.log(`✅ Order ${orderId} updated via PhonePe Webhook`);
         }
       }
     } catch (err) {
-      console.error("Webhook processing error:", err);
+      console.error("❌ Webhook processing error:", err);
     }
   }
-  // Always return 200 OK to PhonePe
+  // Always return 200 OK to PhonePe to stop them from retrying
   res.status(200).send("OK");
 });
 
