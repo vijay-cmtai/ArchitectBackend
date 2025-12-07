@@ -2,22 +2,12 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
-const { HttpsProxyAgent } = require("https-proxy-agent"); // ✅ Proxy Agent
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
 
-// --- PROXY CONFIGURATION ---
-// Vercel se request is Agent ke through jayegi
-const getProxyAgent = () => {
-  if (process.env.PHONEPE_PROXY_URL) {
-    console.log("🔒 Routing traffic through Static Proxy");
-    return new HttpsProxyAgent(process.env.PHONEPE_PROXY_URL);
-  }
-  return null;
-};
-
 // --- HELPER FUNCTIONS ---
+
 const getDownloadableFilesForOrder = async (orderItems) => {
   const files = [];
   for (const item of orderItems) {
@@ -68,36 +58,48 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * ✅ PhonePe OAuth Token (With Proxy)
+ * ✅ FIXED: Get PhonePe OAuth Access Token
+ * URL CORRECTED: Removed '/apis/hermes' from Auth URL
  */
 const getPhonePeAuthToken = async () => {
-  const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
+  // ⚠️ CORRECT URL FOR AUTH (No /apis/hermes here)
+  const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
 
+  console.log("🔄 [PhonePe Auth] Generating Token...");
+  console.log("📍 URL:", tokenUrl);
+  
+  // Use URLSearchParams to force application/x-www-form-urlencoded
   const params = new URLSearchParams();
   params.append("grant_type", "client_credentials");
   params.append("client_id", process.env.PHONEPE_CLIENT_ID);
   params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
 
-  const config = {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  };
-
-  // Attach Proxy if exists
-  const agent = getProxyAgent();
-  if (agent) config.httpsAgent = agent;
-
   try {
-    const response = await axios.post(tokenUrl, params, config);
-    console.log("✅ PhonePe Token Received via Proxy");
+    const response = await axios.post(tokenUrl, params, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    console.log("✅ [PhonePe Auth] Token Received");
     return response.data.access_token;
   } catch (error) {
-    console.error("❌ PhonePe Auth Failed:");
-    if (error.response?.status === 403) {
-      throw new Error(
-        "PROXY IP BLOCKED: Please whitelist your Proxy IP on PhonePe Dashboard."
-      );
+    console.error("❌ [PhonePe Auth] Failed:");
+    
+    if (error.response) {
+      console.error("⚠️ Status:", error.response.status);
+      console.error("⚠️ Data:", JSON.stringify(error.response.data, null, 2));
+      
+      if (error.response.status === 403) {
+        throw new Error("PHONEPE IP BLOCK: Vercel IP is not whitelisted. This will fail on Vercel without a Proxy.");
+      }
+    } else {
+      console.error("⚠️ Error:", error.message);
     }
-    throw new Error(error.response?.data?.message || "PhonePe Auth Failed");
+
+    throw new Error(
+      error.response?.data?.message || "Failed to authenticate with PhonePe"
+    );
   }
 };
 
@@ -285,18 +287,23 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
 // --- PHONEPE V2 CONTROLLERS ---
 
 /**
- * 1. Create Payment (With Proxy)
+ * 1. Create PhonePe Payment (V2 with OAuth)
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
-  if (!order) return res.status(404).json({ message: "Order not found" });
+  if (!order) {
+    res.status(404);
+    throw new Error("Order not found");
+  }
 
-  // 1. Get Token
+  // 1. Get Access Token
   const accessToken = await getPhonePeAuthToken();
 
   // 2. Prepare Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
+
+  // Format phone number
   let phoneNumber = order.shippingAddress.phone || "9999999999";
   phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
@@ -309,80 +316,79 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     redirectMode: "REDIRECT",
     callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
     mobileNumber: phoneNumber,
-    paymentInstrument: { type: "PAY_PAGE" },
-  };
-
-  const base64EncodedPayload = Buffer.from(
-    JSON.stringify(payloadData)
-  ).toString("base64");
-  const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
-
-  const config = {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+    paymentInstrument: {
+      type: "PAY_PAGE",
     },
   };
 
-  // Attach Proxy
-  const agent = getProxyAgent();
-  if (agent) config.httpsAgent = agent;
+  // 3. Encode Payload (Base64)
+  const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
+  const base64EncodedPayload = bufferObj.toString("base64");
 
+  // 4. Make Request
   try {
+    // ⚠️ CORRECT URL FOR PAYMENT (With /apis/hermes)
+    const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+
     const response = await axios.post(
       payUrl,
-      { request: base64EncodedPayload },
-      config
+      {
+        request: base64EncodedPayload,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        },
+      }
     );
 
     if (response.data.success) {
       order.merchantTransactionId = merchantTransactionId;
       await order.save();
+
       res.json({
         redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
         merchantTransactionId: merchantTransactionId,
       });
     } else {
+      console.error("❌ PhonePe Payment Creation Failed:", response.data);
       res.status(500);
-      throw new Error(response.data.message || "Initiation failed");
+      throw new Error(response.data.message || "PhonePe initiation failed");
     }
   } catch (error) {
     console.error(
-      "PhonePe Payment Error:",
-      error.response?.data || error.message
+      "❌ PhonePe API Error:",
+      error.response ? error.response.data : error.message
     );
     res.status(500);
-    throw new Error("Payment initiation failed at Gateway");
+    throw new Error("Payment initiation failed at PhonePe Gateway");
   }
 });
 
 /**
- * 2. Check Status (With Proxy)
+ * 2. Check Payment Status (V2 with OAuth)
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
   try {
     const accessToken = await getPhonePeAuthToken();
+
     const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
 
-    const config = {
+    const response = await axios.get(statusUrl, {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
         "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
       },
-    };
-
-    // Attach Proxy
-    const agent = getProxyAgent();
-    if (agent) config.httpsAgent = agent;
-
-    const response = await axios.get(statusUrl, config);
+    });
 
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
       const order = await Order.findById(merchantTransactionId);
+
       if (order && !order.isPaid) {
         await updateOrderAfterPayment(order, {
           id: response.data.data.transactionId,
@@ -395,33 +401,40 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
         });
       }
     }
+
     res.json(response.data);
   } catch (error) {
+    console.error(
+      "❌ PhonePe Status Check Error:",
+      error.response ? error.response.data : error.message
+    );
     res.status(500).json({ message: "Status check failed" });
   }
 });
 
 /**
- * 3. Handle Webhook (No Proxy needed here as PhonePe calls us)
+ * 3. Handle Webhook
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
   if (req.body.response) {
     try {
-      const decodedBody = JSON.parse(
-        Buffer.from(req.body.response, "base64").toString("utf8")
-      );
+      const decodedBuffer = Buffer.from(req.body.response, "base64");
+      const decodedBody = JSON.parse(decodedBuffer.toString("utf8"));
+
       if (decodedBody.code === "PAYMENT_SUCCESS") {
         const orderId = decodedBody.data.merchantTransactionId;
         const order = await Order.findById(orderId);
+
         if (order && !order.isPaid) {
           await updateOrderAfterPayment(order, {
             id: decodedBody.data.transactionId,
             method: "PhonePe Webhook",
           });
+          console.log(`✅ Order ${orderId} updated via PhonePe Webhook`);
         }
       }
     } catch (err) {
-      console.error("Webhook Error:", err);
+      console.error("❌ Webhook processing error:", err);
     }
   }
   res.status(200).send("OK");
