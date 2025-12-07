@@ -66,7 +66,7 @@ const getPhonePeAuthToken = async () => {
   const isUAT = process.env.PHONEPE_ENV === "uat" || process.env.PHONEPE_ENV === "sandbox";
   const tokenUrl = isUAT
     ? "https://api-preprod.phonepe.com/apis/pg-sandbox/v2/authorize"
-    : "https://api.phonepe.com/apis/pg-sandbox/v2/authorize";
+    : "https://api.phonepe.com/apis/hermes/v2/authorize";
 
   const clientId = process.env.PHONEPE_CLIENT_ID?.trim();
   const clientSecret = process.env.PHONEPE_CLIENT_SECRET?.trim();
@@ -340,7 +340,7 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   const isUAT = process.env.PHONEPE_ENV === "uat" || process.env.PHONEPE_ENV === "sandbox";
   const payUrl = isUAT
     ? "https://api-preprod.phonepe.com/apis/pg-sandbox/v2/debit"
-    : "https://api.phonepe.com/apis/pg-sandbox/v2/debit";
+    : "https://api.phonepe.com/apis/hermes/v2/debit";
 
   const payloadData = {
     merchantId: process.env.PHONEPE_MERCHANT_ID,
@@ -419,7 +419,7 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
     const isUAT = process.env.PHONEPE_ENV === "uat" || process.env.PHONEPE_ENV === "sandbox";
     const statusUrl = isUAT
       ? `https://api-preprod.phonepe.com/apis/pg-sandbox/v2/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`
-      : `https://api.phonepe.com/apis/pg-sandbox/v2/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+      : `https://api.phonepe.com/apis/hermes/v2/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
 
     console.log("📍 [PhonePe V2] Status URL:", statusUrl);
 
