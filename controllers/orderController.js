@@ -60,11 +60,18 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 /**
  * ✅ PhonePe V2 - Fetch Auth Token (OAuth 2.0)
  * Documentation: https://developer.phonepe.com/v1/reference/authorization-standard-checkout
- * Endpoint: /v1/oauth/token (Common for UAT and Production)
+ * 
+ * IMPORTANT: PhonePe V2 OAuth might not be enabled for all merchants yet.
+ * If getting 404, contact PhonePe support to enable V2 API access.
  */
 const getPhonePeAuthToken = async () => {
-  // Common endpoint for both UAT and Production
-  const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
+  // Try UAT first, then Production
+  const isUAT = process.env.PHONEPE_ENV === "uat" || process.env.PHONEPE_ENV === "sandbox";
+  
+  // PhonePe V2 OAuth endpoint (as per latest docs)
+  const tokenUrl = isUAT 
+    ? "https://api-preprod.phonepe.com/v1/oauth/token"
+    : "https://api.phonepe.com/v1/oauth/token";
 
   const clientId = process.env.PHONEPE_CLIENT_ID?.trim();
   const clientSecret = process.env.PHONEPE_CLIENT_SECRET?.trim();
@@ -75,7 +82,8 @@ const getPhonePeAuthToken = async () => {
 
   console.log("🔄 [PhonePe V2] Fetching Auth Token...");
   console.log("📍 URL:", tokenUrl);
-  console.log("🔑 Client ID:", clientId.substring(0, 10) + "...");
+  console.log("🔑 Client ID:", clientId);
+  console.log("🌍 Mode:", isUAT ? "UAT/SANDBOX" : "PRODUCTION");
 
   try {
     const response = await axios.post(
@@ -90,6 +98,7 @@ const getPhonePeAuthToken = async () => {
         headers: {
           "Content-Type": "application/json",
         },
+        timeout: 10000, // 10 second timeout
       }
     );
 
@@ -109,9 +118,12 @@ const getPhonePeAuthToken = async () => {
     if (error.response) {
       console.error("⚠️ Status:", error.response.status);
       console.error("⚠️ Response:", JSON.stringify(error.response.data, null, 2));
+      console.error("⚠️ Headers:", JSON.stringify(error.response.headers, null, 2));
       
-      if (error.response.status === 401) {
-        errorMessage = `PhonePe 401 UNAUTHORIZED - Invalid Client ID/Secret`;
+      if (error.response.status === 404) {
+        errorMessage = `PhonePe 404 NOT FOUND - V2 OAuth API not enabled for your account. Please contact PhonePe support to enable V2 API access. Try setting PHONEPE_ENV=uat to test UAT sandbox first.`;
+      } else if (error.response.status === 401) {
+        errorMessage = `PhonePe 401 UNAUTHORIZED - Invalid Client ID/Secret. Double check your credentials.`;
       } else if (error.response.status === 403) {
         errorMessage = `PhonePe 403 FORBIDDEN - IP not whitelisted or access denied`;
       } else if (error.response.status === 400) {
