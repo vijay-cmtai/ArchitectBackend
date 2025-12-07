@@ -2,12 +2,22 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
+const { HttpsProxyAgent } = require("https-proxy-agent"); // ✅ Proxy Agent
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
 
-// --- HELPER FUNCTIONS ---
+// --- PROXY CONFIGURATION ---
+// Vercel se request is Agent ke through jayegi
+const getProxyAgent = () => {
+  if (process.env.PHONEPE_PROXY_URL) {
+    console.log("🔒 Routing traffic through Static Proxy");
+    return new HttpsProxyAgent(process.env.PHONEPE_PROXY_URL);
+  }
+  return null;
+};
 
+// --- HELPER FUNCTIONS ---
 const getDownloadableFilesForOrder = async (orderItems) => {
   const files = [];
   for (const item of orderItems) {
@@ -58,58 +68,36 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * ✅ FIXED: Get PhonePe OAuth Access Token
- * The Auth URL is often different from the Payment URL.
- * We force the correct structure here.
+ * ✅ PhonePe OAuth Token (With Proxy)
  */
 const getPhonePeAuthToken = async () => {
-  // ⚠️ CRITICAL FIX: Ensure no double slashes and correct base
-  // Sometimes Auth is at https://api.phonepe.com/v1/oauth/token 
-  // NOT https://api.phonepe.com/apis/hermes/v1/oauth/token
-  
-  // We use the raw base URL without /apis/hermes for Auth if the first attempt fails, 
-  // but for now, let's try the standard production auth URL explicitly.
-  const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token"; 
-  
-  const data = new URLSearchParams();
-  data.append("grant_type", "client_credentials");
-  data.append("client_id", process.env.PHONEPE_CLIENT_ID);
-  data.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+  const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
 
-  console.log("🔄 Requesting PhonePe Token...");
-  console.log("📍 URL:", tokenUrl);
+  const params = new URLSearchParams();
+  params.append("grant_type", "client_credentials");
+  params.append("client_id", process.env.PHONEPE_CLIENT_ID);
+  params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+
+  const config = {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  };
+
+  // Attach Proxy if exists
+  const agent = getProxyAgent();
+  if (agent) config.httpsAgent = agent;
 
   try {
-    const response = await axios.post(tokenUrl, data, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
-
-    console.log("✅ PhonePe Access Token Received");
+    const response = await axios.post(tokenUrl, params, config);
+    console.log("✅ PhonePe Token Received via Proxy");
     return response.data.access_token;
   } catch (error) {
     console.error("❌ PhonePe Auth Failed:");
-    console.error("Status:", error.response?.status);
-    console.error("Response:", JSON.stringify(error.response?.data || {}, null, 2));
-
-    // Fallback: If "Api Mapping Not Found", try the non-hermes URL
-    if (error.response?.status === 404 || error.response?.data?.message?.includes("Api Mapping")) {
-        console.log("⚠️ Retrying with fallback Auth URL...");
-        try {
-            const fallbackUrl = "https://api.phonepe.com/v1/oauth/token";
-            const fallbackResponse = await axios.post(fallbackUrl, data, {
-                headers: { "Content-Type": "application/x-www-form-urlencoded" }
-            });
-            console.log("✅ PhonePe Access Token Received (Fallback)");
-            return fallbackResponse.data.access_token;
-        } catch (fallbackError) {
-             console.error("❌ Fallback Auth also failed");
-             throw new Error("Failed to authenticate with PhonePe (Both URLs failed)");
-        }
+    if (error.response?.status === 403) {
+      throw new Error(
+        "PROXY IP BLOCKED: Please whitelist your Proxy IP on PhonePe Dashboard."
+      );
     }
-
-    throw new Error(error.response?.data?.message || "Failed to authenticate with PhonePe");
+    throw new Error(error.response?.data?.message || "PhonePe Auth Failed");
   }
 };
 
@@ -297,22 +285,18 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
 // --- PHONEPE V2 CONTROLLERS ---
 
 /**
- * 1. Create PhonePe Payment (V2 with OAuth)
+ * 1. Create Payment (With Proxy)
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
-  if (!order) {
-    res.status(404);
-    throw new Error("Order not found");
-  }
+  if (!order) return res.status(404).json({ message: "Order not found" });
 
-  // 1. Get Access Token (Logic updated to handle fallbacks)
+  // 1. Get Token
   const accessToken = await getPhonePeAuthToken();
 
   // 2. Prepare Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
-
   let phoneNumber = order.shippingAddress.phone || "9999999999";
   phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
@@ -325,77 +309,80 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     redirectMode: "REDIRECT",
     callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
     mobileNumber: phoneNumber,
-    paymentInstrument: {
-      type: "PAY_PAGE",
+    paymentInstrument: { type: "PAY_PAGE" },
+  };
+
+  const base64EncodedPayload = Buffer.from(
+    JSON.stringify(payloadData)
+  ).toString("base64");
+  const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+
+  const config = {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
     },
   };
 
-  const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
-  const base64EncodedPayload = bufferObj.toString("base64");
+  // Attach Proxy
+  const agent = getProxyAgent();
+  if (agent) config.httpsAgent = agent;
 
   try {
-    // Explicitly use the Hermes Payment URL
-    const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
-
     const response = await axios.post(
       payUrl,
-      {
-        request: base64EncodedPayload,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
-        },
-      }
+      { request: base64EncodedPayload },
+      config
     );
 
     if (response.data.success) {
       order.merchantTransactionId = merchantTransactionId;
       await order.save();
-
       res.json({
         redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
         merchantTransactionId: merchantTransactionId,
       });
     } else {
-      console.error("❌ PhonePe Payment Error:", response.data);
       res.status(500);
-      throw new Error(response.data.message || "PhonePe initiation failed");
+      throw new Error(response.data.message || "Initiation failed");
     }
   } catch (error) {
     console.error(
-      "❌ PhonePe API Error:",
-      error.response ? error.response.data : error.message
+      "PhonePe Payment Error:",
+      error.response?.data || error.message
     );
     res.status(500);
-    throw new Error("Payment initiation failed at PhonePe Gateway");
+    throw new Error("Payment initiation failed at Gateway");
   }
 });
 
 /**
- * 2. Check Payment Status (V2 with OAuth)
+ * 2. Check Status (With Proxy)
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
   try {
     const accessToken = await getPhonePeAuthToken();
-
     const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
 
-    const response = await axios.get(statusUrl, {
+    const config = {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
         "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
       },
-    });
+    };
+
+    // Attach Proxy
+    const agent = getProxyAgent();
+    if (agent) config.httpsAgent = agent;
+
+    const response = await axios.get(statusUrl, config);
 
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
       const order = await Order.findById(merchantTransactionId);
-
       if (order && !order.isPaid) {
         await updateOrderAfterPayment(order, {
           id: response.data.data.transactionId,
@@ -408,40 +395,33 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
         });
       }
     }
-
     res.json(response.data);
   } catch (error) {
-    console.error(
-      "❌ PhonePe Status Check Error:",
-      error.response ? error.response.data : error.message
-    );
     res.status(500).json({ message: "Status check failed" });
   }
 });
 
 /**
- * 3. Handle Webhook
+ * 3. Handle Webhook (No Proxy needed here as PhonePe calls us)
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
   if (req.body.response) {
     try {
-      const decodedBuffer = Buffer.from(req.body.response, "base64");
-      const decodedBody = JSON.parse(decodedBuffer.toString("utf8"));
-
+      const decodedBody = JSON.parse(
+        Buffer.from(req.body.response, "base64").toString("utf8")
+      );
       if (decodedBody.code === "PAYMENT_SUCCESS") {
         const orderId = decodedBody.data.merchantTransactionId;
         const order = await Order.findById(orderId);
-
         if (order && !order.isPaid) {
           await updateOrderAfterPayment(order, {
             id: decodedBody.data.transactionId,
             method: "PhonePe Webhook",
           });
-          console.log(`✅ Order ${orderId} updated via PhonePe Webhook`);
         }
       }
     } catch (err) {
-      console.error("❌ Webhook processing error:", err);
+      console.error("Webhook Error:", err);
     }
   }
   res.status(200).send("OK");
