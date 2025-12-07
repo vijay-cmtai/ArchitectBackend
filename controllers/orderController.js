@@ -58,25 +58,72 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * ✅ CORRECTED: PhonePe X-VERIFY Checksum Generator
- * PhonePe uses SHA256 checksum authentication, NOT OAuth
+ * ✅ PhonePe V2 OAuth Token Generator (CORRECTED)
+ * Production URL: https://api.phonepe.com/v1/oauth/token
  */
-const generatePhonePeChecksum = (payload, endpoint) => {
-  const saltKey = process.env.PHONEPE_SALT_KEY;
-  const saltIndex = process.env.PHONEPE_SALT_INDEX || "1";
-  
-  if (!saltKey) {
-    throw new Error("PHONEPE_SALT_KEY is not configured");
+const getPhonePeAuthToken = async () => {
+  const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
+
+  const clientId = process.env.PHONEPE_CLIENT_ID?.trim();
+  const clientSecret = process.env.PHONEPE_CLIENT_SECRET?.trim();
+
+  if (!clientId || !clientSecret) {
+    throw new Error("PhonePe credentials missing in environment variables");
   }
-  
-  // Create checksum: SHA256(base64Payload + endpoint + saltKey) + ### + saltIndex
-  const stringToHash = payload + endpoint + saltKey;
-  const sha256Hash = crypto
-    .createHash("sha256")
-    .update(stringToHash)
-    .digest("hex");
-  
-  return sha256Hash + "###" + saltIndex;
+
+  // Create Basic Auth header: Base64(client_id:client_secret)
+  const authString = `${clientId}:${clientSecret}`;
+  const base64Auth = Buffer.from(authString).toString("base64");
+
+  console.log("🔄 [PhonePe V2 OAuth] Requesting Token...");
+  console.log("📍 URL:", tokenUrl);
+  console.log("🔑 Client ID:", clientId);
+  console.log("🔑 Merchant ID:", process.env.PHONEPE_MERCHANT_ID);
+
+  try {
+    const response = await axios.post(
+      tokenUrl,
+      "grant_type=client_credentials",
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Basic ${base64Auth}`,
+        },
+      }
+    );
+
+    console.log("✅ [PhonePe V2 OAuth] Token received successfully");
+    return response.data.access_token;
+
+  } catch (error) {
+    console.error("❌ [PhonePe V2 OAuth] FAILED");
+    
+    let errorMessage = "Failed to authenticate with PhonePe V2";
+    
+    if (error.response) {
+      console.error("⚠️ Status:", error.response.status);
+      console.error("⚠️ Response:", JSON.stringify(error.response.data, null, 2));
+      console.error("⚠️ Headers:", error.response.headers);
+      
+      if (error.response.status === 401) {
+        errorMessage = `PhonePe 401 UNAUTHORIZED - Client ID ya Secret galat hai. Credentials check karo.`;
+      } else if (error.response.status === 403) {
+        errorMessage = `PhonePe 403 FORBIDDEN - IP whitelist mein nahi hai ya access denied.`;
+      } else if (error.response.status === 404) {
+        errorMessage = `PhonePe 404 NOT FOUND - Endpoint wrong hai. V2 OAuth shayad available nahi hai.`;
+      } else {
+        errorMessage = `PhonePe Auth Error (${error.response.status}): ${JSON.stringify(error.response.data)}`;
+      }
+    } else if (error.request) {
+      console.error("⚠️ No Response from PhonePe");
+      errorMessage = "Network Error - PhonePe server tak request nahi pahunchi";
+    } else {
+      console.error("⚠️ Setup Error:", error.message);
+      errorMessage = error.message;
+    }
+
+    throw new Error(errorMessage);
+  }
 };
 
 // --- STANDARD ORDER CONTROLLERS ---
@@ -260,10 +307,10 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PHONEPE CONTROLLERS (CORRECTED - X-VERIFY METHOD) ---
+// --- PHONEPE V2 CONTROLLERS (OAuth Method) ---
 
 /**
- * ✅ 1. Create PhonePe Payment (Using X-VERIFY Checksum)
+ * ✅ 1. Create PhonePe Payment (V2 with OAuth)
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
@@ -272,9 +319,12 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  console.log("🔄 [PhonePe] Creating payment for order:", order._id);
+  console.log("🔄 [PhonePe V2] Creating payment for order:", order._id);
 
-  // Prepare Payment Data
+  // 1. Get OAuth Access Token
+  const accessToken = await getPhonePeAuthToken();
+
+  // 2. Prepare Payment Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
 
@@ -295,36 +345,31 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     },
   };
 
-  // Encode payload to Base64
-  const base64EncodedPayload = Buffer.from(
-    JSON.stringify(payloadData),
-    "utf8"
-  ).toString("base64");
-
-  // Generate X-VERIFY checksum
-  const endpoint = "/pg/v1/pay";
-  const xVerify = generatePhonePeChecksum(base64EncodedPayload, endpoint);
-
-  console.log("📦 [PhonePe] Payload prepared");
-  console.log("🔑 [PhonePe] X-VERIFY generated");
+  console.log("📦 [PhonePe V2] Payload:", {
+    merchantId: payloadData.merchantId,
+    amount: payloadData.amount,
+    merchantTransactionId: payloadData.merchantTransactionId,
+  });
 
   try {
-    const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+    // Using your PHONEPE_API_URL from env
+    const payUrl = `${process.env.PHONEPE_API_URL}/pg/v1/pay`;
+
+    console.log("📍 [PhonePe V2] Calling:", payUrl);
 
     const response = await axios.post(
       payUrl,
-      {
-        request: base64EncodedPayload,
-      },
+      payloadData,
       {
         headers: {
           "Content-Type": "application/json",
-          "X-VERIFY": xVerify,
+          "Authorization": `Bearer ${accessToken}`,
+          "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
         },
       }
     );
 
-    console.log("✅ [PhonePe] API Response:", response.data);
+    console.log("✅ [PhonePe V2] API Response:", response.data);
 
     if (response.data.success) {
       order.merchantTransactionId = merchantTransactionId;
@@ -335,13 +380,13 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
         merchantTransactionId: merchantTransactionId,
       });
     } else {
-      console.error("❌ [PhonePe] Payment Creation Failed:", response.data);
+      console.error("❌ [PhonePe V2] Payment Creation Failed:", response.data);
       res.status(500);
       throw new Error(response.data.message || "PhonePe initiation failed");
     }
   } catch (error) {
     console.error(
-      "❌ [PhonePe] API Error:",
+      "❌ [PhonePe V2] API Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500);
@@ -352,28 +397,30 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
 });
 
 /**
- * ✅ 2. Check Payment Status (Using X-VERIFY Checksum)
+ * ✅ 2. Check Payment Status (V2 with OAuth)
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
-  console.log("🔄 [PhonePe] Checking status for:", merchantTransactionId);
+  console.log("🔄 [PhonePe V2] Checking status for:", merchantTransactionId);
 
   try {
-    // Generate endpoint and checksum
-    const endpoint = `/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
-    const xVerify = generatePhonePeChecksum("", endpoint);
+    const accessToken = await getPhonePeAuthToken();
 
-    const statusUrl = `https://api.phonepe.com/apis/hermes${endpoint}`;
+    // Using your PHONEPE_API_URL from env
+    const statusUrl = `${process.env.PHONEPE_API_URL}/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+
+    console.log("📍 [PhonePe V2] Status URL:", statusUrl);
 
     const response = await axios.get(statusUrl, {
       headers: {
         "Content-Type": "application/json",
-        "X-VERIFY": xVerify,
+        "Authorization": `Bearer ${accessToken}`,
+        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
       },
     });
 
-    console.log("✅ [PhonePe] Status Response:", response.data);
+    console.log("✅ [PhonePe V2] Status Response:", response.data);
 
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
       const order = await Order.findById(merchantTransactionId);
@@ -383,7 +430,7 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
           id: response.data.data.transactionId,
           method: "PhonePe",
         });
-        console.log(`✅ [PhonePe] Order ${merchantTransactionId} marked as paid`);
+        console.log(`✅ [PhonePe V2] Order ${merchantTransactionId} marked as paid`);
         
         return res.json({
           success: true,
@@ -396,7 +443,7 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error(
-      "❌ [PhonePe] Status Check Error:",
+      "❌ [PhonePe V2] Status Check Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500).json({ 
@@ -410,31 +457,35 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
  * ✅ 3. Handle PhonePe Webhook
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
-  console.log("🔔 [PhonePe] Webhook received");
+  console.log("🔔 [PhonePe V2] Webhook received");
+  console.log("📨 [PhonePe V2] Webhook body:", req.body);
 
-  if (req.body.response) {
-    try {
-      // Decode Base64 response
-      const decodedBuffer = Buffer.from(req.body.response, "base64");
-      const decodedBody = JSON.parse(decodedBuffer.toString("utf8"));
+  try {
+    // V2 mein direct JSON milta hai, Base64 decode ki zarurat nahi
+    const webhookData = req.body;
 
-      console.log("📨 [PhonePe] Webhook Data:", decodedBody);
+    console.log("📨 [PhonePe V2] Webhook Data:", webhookData);
 
-      if (decodedBody.code === "PAYMENT_SUCCESS") {
-        const orderId = decodedBody.data.merchantTransactionId;
-        const order = await Order.findById(orderId);
-
-        if (order && !order.isPaid) {
-          await updateOrderAfterPayment(order, {
-            id: decodedBody.data.transactionId,
-            method: "PhonePe Webhook",
-          });
-          console.log(`✅ [PhonePe] Order ${orderId} updated via webhook`);
-        }
+    if (webhookData.code === "PAYMENT_SUCCESS") {
+      const orderId = webhookData.data?.merchantTransactionId;
+      
+      if (!orderId) {
+        console.error("❌ [PhonePe V2] merchantTransactionId missing in webhook");
+        return res.status(200).send("OK");
       }
-    } catch (err) {
-      console.error("❌ [PhonePe] Webhook processing error:", err);
+
+      const order = await Order.findById(orderId);
+
+      if (order && !order.isPaid) {
+        await updateOrderAfterPayment(order, {
+          id: webhookData.data.transactionId,
+          method: "PhonePe V2 Webhook",
+        });
+        console.log(`✅ [PhonePe V2] Order ${orderId} updated via webhook`);
+      }
     }
+  } catch (err) {
+    console.error("❌ [PhonePe V2] Webhook processing error:", err);
   }
 
   // Always respond with 200 to acknowledge webhook receipt
