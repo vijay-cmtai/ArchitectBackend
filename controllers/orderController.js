@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
+const querystring = require("querystring"); // ✅ Native Node module use kar rahe hain formatting ke liye
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
@@ -58,48 +59,60 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 /**
- * ✅ FIXED: Get PhonePe OAuth Access Token
- * URL CORRECTED: Removed '/apis/hermes' from Auth URL
+ * ✅ DEBUG MODE: Get PhonePe OAuth Access Token
+ * Ye function ab exact error fekega taaki hume pata chale issue kya hai
  */
 const getPhonePeAuthToken = async () => {
-  // ⚠️ CORRECT URL FOR AUTH (No /apis/hermes here)
   const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
 
-  console.log("🔄 [PhonePe Auth] Generating Token...");
+  // Using querystring to guarantee application/x-www-form-urlencoded
+  const payload = querystring.stringify({
+    grant_type: "client_credentials",
+    client_id: process.env.PHONEPE_CLIENT_ID ? process.env.PHONEPE_CLIENT_ID.trim() : "",
+    client_secret: process.env.PHONEPE_CLIENT_SECRET ? process.env.PHONEPE_CLIENT_SECRET.trim() : "",
+  });
+
+  console.log("🔄 [PhonePe Auth] Requesting Token...");
   console.log("📍 URL:", tokenUrl);
-  
-  // Use URLSearchParams to force application/x-www-form-urlencoded
-  const params = new URLSearchParams();
-  params.append("grant_type", "client_credentials");
-  params.append("client_id", process.env.PHONEPE_CLIENT_ID);
-  params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+  console.log("🔑 Client ID (First 5 chars):", process.env.PHONEPE_CLIENT_ID?.substring(0, 5));
 
   try {
-    const response = await axios.post(tokenUrl, params, {
+    const response = await axios.post(tokenUrl, payload, {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
       },
     });
 
-    console.log("✅ [PhonePe Auth] Token Received");
+    console.log("✅ [PhonePe Auth] Success");
     return response.data.access_token;
+
   } catch (error) {
-    console.error("❌ [PhonePe Auth] Failed:");
+    console.error("❌ [PhonePe Auth] FAILED");
+    
+    let errorMessage = "Failed to authenticate with PhonePe";
     
     if (error.response) {
+      // Server responded with a status code outside the 2xx range
       console.error("⚠️ Status:", error.response.status);
       console.error("⚠️ Data:", JSON.stringify(error.response.data, null, 2));
       
       if (error.response.status === 403) {
-        throw new Error("PHONEPE IP BLOCK: Vercel IP is not whitelisted. This will fail on Vercel without a Proxy.");
+        errorMessage = `PHONEPE 403 FORBIDDEN (IP Blocked). Vercel IP is not allowed. Response: ${JSON.stringify(error.response.data)}`;
+      } else if (error.response.status === 401) {
+        errorMessage = `PHONEPE 401 UNAUTHORIZED (Wrong ID/Secret). Response: ${JSON.stringify(error.response.data)}`;
+      } else {
+        errorMessage = `PhonePe Auth Error (${error.response.status}): ${JSON.stringify(error.response.data)}`;
       }
+    } else if (error.request) {
+      console.error("⚠️ No Response received from PhonePe");
+      errorMessage = "No response from PhonePe Server (Network Issue)";
     } else {
-      console.error("⚠️ Error:", error.message);
+      console.error("⚠️ Setup Error:", error.message);
+      errorMessage = error.message;
     }
 
-    throw new Error(
-      error.response?.data?.message || "Failed to authenticate with PhonePe"
-    );
+    throw new Error(errorMessage);
   }
 };
 
@@ -296,14 +309,13 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  // 1. Get Access Token
+  // 1. Get Access Token (Errors will be caught by asyncHandler and sent to frontend)
   const accessToken = await getPhonePeAuthToken();
 
   // 2. Prepare Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
 
-  // Format phone number
   let phoneNumber = order.shippingAddress.phone || "9999999999";
   phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
@@ -321,13 +333,10 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     },
   };
 
-  // 3. Encode Payload (Base64)
   const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
   const base64EncodedPayload = bufferObj.toString("base64");
 
-  // 4. Make Request
   try {
-    // ⚠️ CORRECT URL FOR PAYMENT (With /apis/hermes)
     const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
 
     const response = await axios.post(
@@ -363,12 +372,12 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       error.response ? error.response.data : error.message
     );
     res.status(500);
-    throw new Error("Payment initiation failed at PhonePe Gateway");
+    throw new Error(error.response?.data?.message || "Payment initiation failed");
   }
 });
 
 /**
- * 2. Check Payment Status (V2 with OAuth)
+ * 2. Check Payment Status
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
