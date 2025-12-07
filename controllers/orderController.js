@@ -60,13 +60,11 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 /**
  * ✅ PhonePe V2 - Fetch Auth Token (OAuth 2.0)
  * Documentation: https://developer.phonepe.com/v1/reference/authorization-standard-checkout
+ * Endpoint: /v1/oauth/token (Common for UAT and Production)
  */
 const getPhonePeAuthToken = async () => {
-  // UAT vs Production URL
-  const isUAT = process.env.PHONEPE_ENV === "uat" || process.env.PHONEPE_ENV === "sandbox";
-  const tokenUrl = isUAT
-    ? "https://api-preprod.phonepe.com/apis/pg-sandbox/v2/authorize"
-    : "https://api.phonepe.com/apis/hermes/v2/authorize";
+  // Common endpoint for both UAT and Production
+  const tokenUrl = "https://api.phonepe.com/v1/oauth/token";
 
   const clientId = process.env.PHONEPE_CLIENT_ID?.trim();
   const clientSecret = process.env.PHONEPE_CLIENT_SECRET?.trim();
@@ -83,8 +81,10 @@ const getPhonePeAuthToken = async () => {
     const response = await axios.post(
       tokenUrl,
       {
-        clientId: clientId,
-        clientSecret: clientSecret,
+        client_id: clientId,
+        client_version: 1,
+        client_secret: clientSecret,
+        grant_type: "client_credentials",
       },
       {
         headers: {
@@ -93,9 +93,10 @@ const getPhonePeAuthToken = async () => {
       }
     );
 
-    if (response.data && response.data.accessToken) {
+    if (response.data && response.data.access_token) {
       console.log("✅ [PhonePe V2] Auth Token received");
-      return response.data.accessToken;
+      console.log("⏰ Token expires in:", response.data.expires_in, "seconds");
+      return response.data.access_token;
     } else {
       throw new Error("No access token in response");
     }
@@ -113,8 +114,8 @@ const getPhonePeAuthToken = async () => {
         errorMessage = `PhonePe 401 UNAUTHORIZED - Invalid Client ID/Secret`;
       } else if (error.response.status === 403) {
         errorMessage = `PhonePe 403 FORBIDDEN - IP not whitelisted or access denied`;
-      } else if (error.response.status === 404) {
-        errorMessage = `PhonePe 404 NOT FOUND - Wrong endpoint. Check PHONEPE_ENV setting.`;
+      } else if (error.response.status === 400) {
+        errorMessage = `PhonePe 400 BAD REQUEST - ${JSON.stringify(error.response.data)}`;
       } else {
         errorMessage = `PhonePe Auth Error (${error.response.status}): ${JSON.stringify(error.response.data)}`;
       }
