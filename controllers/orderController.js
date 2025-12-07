@@ -59,32 +59,48 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 
 /**
  * ✅ FIXED: Get PhonePe OAuth Access Token
- * Must use 'application/x-www-form-urlencoded'
+ * 1. Forces data to string (payload=value&...)
+ * 2. Adds detailed logging for debugging
  */
 const getPhonePeAuthToken = async () => {
+  const tokenUrl = `${process.env.PHONEPE_API_URL}/v1/oauth/token`;
+  
+  // Create Form Data manually
+  const data = new URLSearchParams();
+  data.append("grant_type", "client_credentials");
+  data.append("client_id", process.env.PHONEPE_CLIENT_ID);
+  data.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+
+  console.log("🔄 Attempting PhonePe Auth...");
+  console.log("📍 URL:", tokenUrl);
+  console.log("🔑 Client ID:", process.env.PHONEPE_CLIENT_ID);
+
   try {
-    const params = new URLSearchParams();
-    params.append("grant_type", "client_credentials");
-    params.append("client_id", process.env.PHONEPE_CLIENT_ID);
-    params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
-
-    // Note: URL structure is Base URL + /v1/oauth/token
-    const tokenUrl = `${process.env.PHONEPE_API_URL}/v1/oauth/token`;
-
-    const response = await axios.post(tokenUrl, params, {
+    // .toString() forces it to be application/x-www-form-urlencoded
+    const response = await axios.post(tokenUrl, data.toString(), {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
 
-    console.log("✅ PhonePe Token Generated");
+    console.log("✅ PhonePe Access Token Received");
     return response.data.access_token;
   } catch (error) {
-    console.error(
-      "❌ PhonePe Auth Error:",
-      error.response ? error.response.data : error.message
+    // LOG THE REAL ERROR FROM PHONEPE
+    console.error("❌ PhonePe Auth FAILED:");
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error("Error:", error.message);
+    }
+    
+    // Throw error to stop flow
+    throw new Error(
+      error.response?.data?.error_description || 
+      error.response?.data?.message || 
+      "Failed to authenticate with PhonePe"
     );
-    throw new Error("Failed to authenticate with PhonePe");
   }
 };
 
@@ -269,7 +285,7 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PHONEPE V2 CONTROLLERS (Corrected) ---
+// --- PHONEPE V2 CONTROLLERS ---
 
 /**
  * 1. Create PhonePe Payment (V2 with OAuth)
@@ -281,14 +297,14 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 
-  // 1. Get Access Token
+  // 1. Get Access Token (Will throw specific error if fails)
   const accessToken = await getPhonePeAuthToken();
 
   // 2. Prepare Data
   const merchantTransactionId = order._id.toString();
   const amount = Math.round(order.totalPrice * 100);
-  
-  // Format phone number (10 digits)
+
+  // Format phone number
   let phoneNumber = order.shippingAddress.phone || "9999999999";
   phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
@@ -310,10 +326,10 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   const bufferObj = Buffer.from(JSON.stringify(payloadData), "utf8");
   const base64EncodedPayload = bufferObj.toString("base64");
 
-  // 4. Make Request (API URL + /pg/v1/pay)
+  // 4. Make Request
   try {
     const payUrl = `${process.env.PHONEPE_API_URL}/pg/v1/pay`;
-    
+
     const response = await axios.post(
       payUrl,
       {
@@ -322,7 +338,7 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`, // Bearer Token from Step 1
+          Authorization: `Bearer ${accessToken}`,
           "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
         },
       }
@@ -337,13 +353,13 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
         merchantTransactionId: merchantTransactionId,
       });
     } else {
-      console.error("PhonePe Success False:", response.data);
+      console.error("❌ PhonePe Payment Creation Failed:", response.data);
       res.status(500);
       throw new Error(response.data.message || "PhonePe initiation failed");
     }
   } catch (error) {
     console.error(
-      "❌ PhonePe Create Order Error:",
+      "❌ PhonePe API Error:",
       error.response ? error.response.data : error.message
     );
     res.status(500);
@@ -358,22 +374,17 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
   try {
-    // 1. Get Access Token
     const accessToken = await getPhonePeAuthToken();
 
-    // 2. Call Status API
     const statusUrl = `${process.env.PHONEPE_API_URL}/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
 
-    const response = await axios.get(
-      statusUrl,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`, 
-          "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
-        },
-      }
-    );
+    const response = await axios.get(statusUrl, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+      },
+    });
 
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
       const order = await Order.findById(merchantTransactionId);
@@ -405,7 +416,6 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
  * 3. Handle Webhook
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
-  // PhonePe V2 sends the payload base64 encoded in `response`
   if (req.body.response) {
     try {
       const decodedBuffer = Buffer.from(req.body.response, "base64");
@@ -427,7 +437,6 @@ const handlePhonePeWebhook = asyncHandler(async (req, res) => {
       console.error("❌ Webhook processing error:", err);
     }
   }
-  // Always return 200 OK to PhonePe to stop them from retrying
   res.status(200).send("OK");
 });
 
