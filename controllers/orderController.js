@@ -362,17 +362,18 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     const accessToken = await getPhonePeAuthToken();
 
     // 2. Prepare Payment Data
-    const merchantTransactionId = `TXN_${order._id}_${Date.now()}`;
+    const merchantTransactionId = `TXN${order._id}${Date.now()}`.substring(0, 35); // Max 35 chars
     const amount = Math.round(order.totalPrice * 100); // Convert to paise
 
     // Clean phone number
     let phoneNumber = order.shippingAddress?.phone || "9999999999";
     phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
+    // ✅ FIXED: Correct V2 payload structure
     const payloadData = {
       merchantId: process.env.PHONEPE_MERCHANT_ID,
       merchantTransactionId: merchantTransactionId,
-      merchantUserId: order.user ? order.user.toString() : `GUEST_${Date.now()}`,
+      merchantUserId: order.user ? order.user.toString().substring(0, 36) : `GUEST${Date.now()}`,
       amount: amount,
       redirectUrl: `${process.env.FRONTEND_URL}/order/${order._id}`,
       redirectMode: "REDIRECT",
@@ -384,26 +385,32 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     };
 
     console.log("📦 Payment Payload:", JSON.stringify(payloadData, null, 2));
+    console.log("🔑 Using Merchant ID:", process.env.PHONEPE_MERCHANT_ID);
+    console.log("🔐 Token Length:", accessToken.length);
 
     // 3. Encode Payload
     const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
 
-    // 4. API Call
-    const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+    // ✅ FIXED: Use correct V2 API endpoint with merchant ID in URL
+    const payUrl = `https://api.phonepe.com/apis/hermes/pg/v1/pay`;
 
     const config = {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
         "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
-        "Accept": "application/json"
+        "Accept": "application/json",
+        "X-VERIFY": base64Payload // Some versions require this
       },
     };
 
     const agent = getProxyAgent();
     if (agent) config.httpsAgent = agent;
 
-    console.log("🚀 Sending Payment Request to PhonePe...");
+    console.log("🚀 API Endpoint:", payUrl);
+    console.log("📤 Request Headers:", JSON.stringify(config.headers, null, 2));
+    console.log("📤 Request Body:", JSON.stringify({ request: base64Payload }, null, 2));
+
     const response = await axios.post(
       payUrl,
       { request: base64Payload },
@@ -433,19 +440,33 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     console.error("💥 PhonePe Payment Error:", {
       status: error.response?.status,
       statusText: error.response?.statusText,
+      headers: error.response?.headers,
       data: error.response?.data,
-      message: error.message
+      message: error.message,
+      config: {
+        url: error.config?.url,
+        method: error.config?.method,
+        headers: error.config?.headers
+      }
     });
 
     // Detailed error handling
     let errorMessage = "Payment initiation failed";
+    let errorDetails = error.response?.data;
     
-    if (error.response?.status === 404) {
-      errorMessage = "Invalid API endpoint or Merchant ID. Check configuration.";
+    if (error.response?.status === 404 || errorDetails?.message?.includes("Api Mapping Not Found")) {
+      errorMessage = "MERCHANT_NOT_CONFIGURED: Your Merchant ID might not be activated on PhonePe yet. Contact PhonePe support.";
+      errorDetails = {
+        hint: "Check if PHONEPE_MERCHANT_ID is correct and activated",
+        merchantId: process.env.PHONEPE_MERCHANT_ID,
+        originalError: error.response?.data
+      };
     } else if (error.response?.status === 401) {
-      errorMessage = "Authentication failed. Check credentials.";
+      errorMessage = "Authentication failed. Token might be expired or invalid.";
     } else if (error.response?.status === 403) {
-      errorMessage = "Access forbidden. Whitelist your IP.";
+      errorMessage = "Access forbidden. Whitelist your server IP on PhonePe Dashboard.";
+    } else if (error.response?.status === 400) {
+      errorMessage = "Bad Request: " + (error.response?.data?.message || "Invalid payload");
     } else if (error.response?.data?.message) {
       errorMessage = error.response.data.message;
     }
@@ -453,7 +474,7 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     res.status(error.response?.status || 500).json({
       success: false,
       message: errorMessage,
-      details: error.response?.data || error.message
+      details: errorDetails
     });
   }
 });
