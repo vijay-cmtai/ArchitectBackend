@@ -2,17 +2,12 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
-const { HttpsProxyAgent } = require("https-proxy-agent");
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
 
-const getProxyAgent = () => {
-  if (process.env.PHONEPE_PROXY_URL) {
-    return new HttpsProxyAgent(process.env.PHONEPE_PROXY_URL);
-  }
-  return null;
-};
+// Helper: Trim environment variables to prevent "Api Mapping" errors
+const getEnv = (key) => (process.env[key] ? process.env[key].trim() : "");
 
 const getDownloadableFilesForOrder = async (orderItems) => {
   const files = [];
@@ -64,12 +59,13 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 };
 
 const getPhonePeAuthToken = async () => {
+  // Use "api.phonepe.com" for PROD. Use "api-preprod.phonepe.com" if Testing.
   const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
 
   const params = new URLSearchParams();
   params.append("grant_type", "client_credentials");
-  params.append("client_id", process.env.PHONEPE_CLIENT_ID);
-  params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+  params.append("client_id", getEnv("PHONEPE_CLIENT_ID"));
+  params.append("client_secret", getEnv("PHONEPE_CLIENT_SECRET"));
 
   const config = {
     headers: { 
@@ -78,13 +74,11 @@ const getPhonePeAuthToken = async () => {
     },
   };
 
-  const agent = getProxyAgent();
-  if (agent) config.httpsAgent = agent;
-
   try {
     const response = await axios.post(tokenUrl, params.toString(), config);
     return response.data.access_token;
   } catch (error) {
+    console.error("Auth Token Error:", error.response?.data);
     throw new Error(error.response?.data?.message || "PhonePe Auth Failed");
   }
 };
@@ -108,21 +102,15 @@ const addOrderItems = asyncHandler(async (req, res) => {
   const processedOrderItems = await Promise.all(
     orderItems.map(async (item) => {
       let productOwner = null;
-
-      const profPlan = await ProfessionalPlan.findById(item.productId).select(
-        "user"
-      );
+      const profPlan = await ProfessionalPlan.findById(item.productId).select("user");
       if (profPlan) {
         productOwner = profPlan.user;
       } else {
-        const adminProduct = await Product.findById(item.productId).select(
-          "user"
-        );
+        const adminProduct = await Product.findById(item.productId).select("user");
         if (adminProduct && adminProduct.user) {
           productOwner = adminProduct.user;
         }
       }
-
       return {
         ...item,
         productId: item.productId,
@@ -173,7 +161,6 @@ const getMyOrders = asyncHandler(async (req, res) => {
     });
     return orderObj;
   });
-
   res.json(ordersWithFiles);
 });
 
@@ -182,7 +169,6 @@ const getOrderByIdForGuest = asyncHandler(async (req, res) => {
     "orderItems.productId",
     "name"
   );
-
   if (order) {
     res.json(order);
   } else {
@@ -192,8 +178,8 @@ const getOrderByIdForGuest = asyncHandler(async (req, res) => {
 });
 
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+  key_id: getEnv("RAZORPAY_KEY_ID"),
+  key_secret: getEnv("RAZORPAY_KEY_SECRET"),
 });
 
 const createRazorpayOrder = asyncHandler(async (req, res) => {
@@ -221,8 +207,7 @@ const createRazorpayOrder = asyncHandler(async (req, res) => {
 });
 
 const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-    req.body;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
   const order = await Order.findById(req.params.id);
   if (!order) {
     res.status(404);
@@ -230,7 +215,7 @@ const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
   }
   const body = razorpay_order_id + "|" + razorpay_payment_id;
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+    .createHmac("sha256", getEnv("RAZORPAY_KEY_SECRET"))
     .update(body.toString())
     .digest("hex");
   if (expectedSignature === razorpay_signature) {
@@ -246,7 +231,7 @@ const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
 });
 
 const getPaypalClientId = asyncHandler(async (req, res) => {
-  res.json({ clientId: process.env.PAYPAL_CLIENT_ID });
+  res.json({ clientId: getEnv("PAYPAL_CLIENT_ID") });
 });
 
 const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
@@ -280,13 +265,13 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
     const payloadData = {
-      merchantId: process.env.PHONEPE_MERCHANT_ID,
+      merchantId: getEnv("PHONEPE_MERCHANT_ID"),
       merchantTransactionId: merchantTransactionId,
       merchantUserId: order.user ? order.user.toString() : `GUEST${Date.now()}`,
       amount: amount,
-      redirectUrl: `${process.env.FRONTEND_URL}/order/${order._id}`,
+      redirectUrl: `${getEnv("FRONTEND_URL")}/order/${order._id}`,
       redirectMode: "REDIRECT",
-      callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
+      callbackUrl: `${getEnv("BACKEND_URL")}/api/orders/phonepe-webhook`,
       mobileNumber: phoneNumber,
       paymentInstrument: {
         type: "PAY_PAGE"
@@ -294,19 +279,18 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     };
 
     const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
+    
+    // Ensure this URL is correct. Use 'hermes' for Live.
     const payUrl = `https://api.phonepe.com/apis/hermes/pg/v1/pay`;
 
     const config = {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
-        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        "X-MERCHANT-ID": getEnv("PHONEPE_MERCHANT_ID"),
         "Accept": "application/json"
       },
     };
-
-    const agent = getProxyAgent();
-    if (agent) config.httpsAgent = agent;
 
     const response = await axios.post(
       payUrl,
@@ -332,9 +316,10 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       throw new Error(response.data.message || "Payment initiation failed");
     }
   } catch (error) {
+    console.error("PhonePe Payment Error Details:", error.response?.data);
     res.status(error.response?.status || 500).json({
       success: false,
-      message: error.response?.data?.message || error.message,
+      message: error.response?.data?.message || "Api Mapping Failed: Check Merchant ID or Go-Live Status",
       details: error.response?.data
     });
   }
@@ -345,19 +330,16 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
 
   try {
     const accessToken = await getPhonePeAuthToken();
-    const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
+    const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${getEnv("PHONEPE_MERCHANT_ID")}/${merchantTransactionId}`;
 
     const config = {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
-        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        "X-MERCHANT-ID": getEnv("PHONEPE_MERCHANT_ID"),
         "Accept": "application/json"
       },
     };
-
-    const agent = getProxyAgent();
-    if (agent) config.httpsAgent = agent;
 
     const response = await axios.get(statusUrl, config);
 
@@ -377,7 +359,6 @@ const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
         });
       }
     }
-
     res.json(response.data);
   } catch (error) {
     res.status(error.response?.status || 500).json({
