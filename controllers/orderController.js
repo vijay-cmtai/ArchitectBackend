@@ -2,12 +2,25 @@ const asyncHandler = require("express-async-handler");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const axios = require("axios");
+const { HttpsProxyAgent } = require("https-proxy-agent");
 const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
 
-// --- HELPER FUNCTIONS ---
+// ============================================
+// PROXY CONFIGURATION
+// ============================================
+const getProxyAgent = () => {
+  if (process.env.PHONEPE_PROXY_URL) {
+    console.log("🔒 Using Static Proxy:", process.env.PHONEPE_PROXY_URL);
+    return new HttpsProxyAgent(process.env.PHONEPE_PROXY_URL);
+  }
+  return null;
+};
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 const getDownloadableFilesForOrder = async (orderItems) => {
   const files = [];
   for (const item of orderItems) {
@@ -57,22 +70,63 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
   return await order.save();
 };
 
-/**
- * ✅ PhonePe Standard Checkout - X-VERIFY Checksum Method
- * Production Ready - Works without OAuth
- */
-const generatePhonePeChecksum = (base64Payload, endpoint, saltKey, saltIndex) => {
-  const stringToHash = base64Payload + endpoint + saltKey;
-  const sha256Hash = crypto
-    .createHash("sha256")
-    .update(stringToHash)
-    .digest("hex");
-  
-  return sha256Hash + "###" + saltIndex;
+// ============================================
+// PHONEPE V2 - OAUTH TOKEN
+// ============================================
+const getPhonePeAuthToken = async () => {
+  const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
+
+  const params = new URLSearchParams();
+  params.append("grant_type", "client_credentials");
+  params.append("client_id", process.env.PHONEPE_CLIENT_ID);
+  params.append("client_secret", process.env.PHONEPE_CLIENT_SECRET);
+
+  const config = {
+    headers: { 
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json"
+    },
+  };
+
+  const agent = getProxyAgent();
+  if (agent) config.httpsAgent = agent;
+
+  try {
+    console.log("🔐 Requesting PhonePe OAuth Token...");
+    const response = await axios.post(tokenUrl, params.toString(), config);
+    
+    if (response.data && response.data.access_token) {
+      console.log("✅ Token Received Successfully");
+      return response.data.access_token;
+    } else {
+      throw new Error("No access token in response");
+    }
+  } catch (error) {
+    console.error("❌ PhonePe Auth Failed:", {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    
+    if (error.response?.status === 403) {
+      throw new Error("IP_BLOCKED: Whitelist your IP on PhonePe Dashboard");
+    }
+    if (error.response?.status === 401) {
+      throw new Error("INVALID_CREDENTIALS: Check Client ID/Secret");
+    }
+    throw new Error(error.response?.data?.message || "Auth Failed");
+  }
 };
 
-// --- STANDARD ORDER CONTROLLERS ---
+// ============================================
+// ORDER CONTROLLERS
+// ============================================
 
+/**
+ * @desc    Create new order
+ * @route   POST /api/orders
+ * @access  Public/Protected
+ */
 const addOrderItems = asyncHandler(async (req, res) => {
   const {
     orderItems,
@@ -130,6 +184,11 @@ const addOrderItems = asyncHandler(async (req, res) => {
   res.status(201).json(createdOrder);
 });
 
+/**
+ * @desc    Get logged in user orders
+ * @route   GET /api/orders/myorders
+ * @access  Private
+ */
 const getMyOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({ user: req.user._id })
     .populate({
@@ -161,6 +220,11 @@ const getMyOrders = asyncHandler(async (req, res) => {
   res.json(ordersWithFiles);
 });
 
+/**
+ * @desc    Get order by ID for guest users
+ * @route   GET /api/orders/guest/:orderId
+ * @access  Public
+ */
 const getOrderByIdForGuest = asyncHandler(async (req, res) => {
   const order = await Order.findOne({ orderId: req.params.orderId }).populate(
     "orderItems.productId",
@@ -175,13 +239,20 @@ const getOrderByIdForGuest = asyncHandler(async (req, res) => {
   }
 });
 
-// --- RAZORPAY CONTROLLERS ---
+// ============================================
+// RAZORPAY PAYMENT GATEWAY
+// ============================================
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+/**
+ * @desc    Create Razorpay order
+ * @route   POST /api/orders/:id/create-razorpay-order
+ * @access  Public/Protected
+ */
 const createRazorpayOrder = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order) {
@@ -206,6 +277,11 @@ const createRazorpayOrder = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @desc    Verify Razorpay payment and update order
+ * @route   POST /api/orders/:id/verify-payment
+ * @access  Public/Protected
+ */
 const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
     req.body;
@@ -231,12 +307,24 @@ const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PAYPAL CONTROLLERS ---
+// ============================================
+// PAYPAL PAYMENT GATEWAY
+// ============================================
 
+/**
+ * @desc    Get PayPal client ID
+ * @route   GET /api/orders/paypal/client-id
+ * @access  Public
+ */
 const getPaypalClientId = asyncHandler(async (req, res) => {
   res.json({ clientId: process.env.PAYPAL_CLIENT_ID });
 });
 
+/**
+ * @desc    Update order to paid with PayPal
+ * @route   PUT /api/orders/:id/pay-with-paypal
+ * @access  Public/Protected
+ */
 const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (order) {
@@ -252,237 +340,232 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
   }
 });
 
-// --- PHONEPE PRODUCTION CONTROLLERS ---
+// ============================================
+// PHONEPE V2 PAYMENT GATEWAY
+// ============================================
 
 /**
- * ✅ 1. Create PhonePe Payment - PRODUCTION
- * Standard Checkout with X-VERIFY
+ * @desc    Create PhonePe payment
+ * @route   POST /api/orders/:id/create-phonepe-payment
+ * @access  Public/Protected
  */
 const createPhonePePayment = asyncHandler(async (req, res) => {
+  console.log("📱 Creating PhonePe Payment for Order:", req.params.id);
+
   const order = await Order.findById(req.params.id);
   if (!order) {
-    res.status(404);
-    throw new Error("Order not found");
+    return res.status(404).json({ message: "Order not found" });
   }
-
-  console.log("🔄 [PhonePe] Initiating payment for order:", order._id);
-
-  const merchantTransactionId = `TXN_${order._id}_${Date.now()}`;
-  const amount = Math.round(order.totalPrice * 100);
-
-  let phoneNumber = order.shippingAddress.phone || "9999999999";
-  phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
-
-  const merchantId = process.env.PHONEPE_MERCHANT_ID;
-  const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
-
-  if (!merchantId || !clientSecret) {
-    res.status(500);
-    throw new Error("PhonePe credentials not configured properly");
-  }
-
-  // Payment payload
-  const payloadData = {
-    merchantId: merchantId,
-    merchantTransactionId: merchantTransactionId,
-    merchantUserId: order.user ? order.user.toString() : "GUEST_USER",
-    amount: amount,
-    redirectUrl: `${process.env.FRONTEND_URL}/order/${order._id}`,
-    redirectMode: "REDIRECT",
-    callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
-    mobileNumber: phoneNumber,
-    paymentInstrument: {
-      type: "PAY_PAGE",
-    },
-  };
-
-  const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
-  const endpoint = "/pg/v1/pay";
-  const checksum = generatePhonePeChecksum(base64Payload, endpoint, clientSecret, "1");
-
-  console.log("📦 [PhonePe] Merchant ID:", merchantId);
-  console.log("📦 [PhonePe] Transaction ID:", merchantTransactionId);
-  console.log("💰 [PhonePe] Amount (paise):", amount);
 
   try {
-    // PRODUCTION URL
-    const apiUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+    // 1. Get OAuth Token
+    const accessToken = await getPhonePeAuthToken();
 
-    console.log("📍 [PhonePe] API URL:", apiUrl);
-    console.log("🚀 [PhonePe] Mode: PRODUCTION");
+    // 2. Prepare Payment Data
+    const merchantTransactionId = `TXN_${order._id}_${Date.now()}`;
+    const amount = Math.round(order.totalPrice * 100); // Convert to paise
 
-    const response = await axios.post(
-      apiUrl,
-      { request: base64Payload },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-VERIFY": checksum,
-        },
-        timeout: 15000,
+    // Clean phone number
+    let phoneNumber = order.shippingAddress?.phone || "9999999999";
+    phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
+
+    const payloadData = {
+      merchantId: process.env.PHONEPE_MERCHANT_ID,
+      merchantTransactionId: merchantTransactionId,
+      merchantUserId: order.user ? order.user.toString() : `GUEST_${Date.now()}`,
+      amount: amount,
+      redirectUrl: `${process.env.FRONTEND_URL}/order/${order._id}`,
+      redirectMode: "REDIRECT",
+      callbackUrl: `${process.env.BACKEND_URL}/api/orders/phonepe-webhook`,
+      mobileNumber: phoneNumber,
+      paymentInstrument: {
+        type: "PAY_PAGE"
       }
+    };
+
+    console.log("📦 Payment Payload:", JSON.stringify(payloadData, null, 2));
+
+    // 3. Encode Payload
+    const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
+
+    // 4. API Call
+    const payUrl = "https://api.phonepe.com/apis/hermes/pg/v1/pay";
+
+    const config = {
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        "Accept": "application/json"
+      },
+    };
+
+    const agent = getProxyAgent();
+    if (agent) config.httpsAgent = agent;
+
+    console.log("🚀 Sending Payment Request to PhonePe...");
+    const response = await axios.post(
+      payUrl,
+      { request: base64Payload },
+      config
     );
 
-    console.log("✅ [PhonePe] Response:", JSON.stringify(response.data, null, 2));
+    console.log("📥 PhonePe Response:", JSON.stringify(response.data, null, 2));
 
+    // 5. Handle Response
     if (response.data.success && response.data.data?.instrumentResponse?.redirectInfo?.url) {
+      // Save transaction ID
       order.merchantTransactionId = merchantTransactionId;
+      order.paymentMethod = "PhonePe";
       await order.save();
 
-      res.json({
+      return res.json({
         success: true,
         redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
         merchantTransactionId: merchantTransactionId,
+        message: "Payment initiated successfully"
       });
     } else {
-      console.error("❌ [PhonePe] Payment failed:", response.data);
-      res.status(500);
-      throw new Error(response.data.message || "PhonePe payment initiation failed");
+      console.error("❌ Payment Initiation Failed:", response.data);
+      throw new Error(response.data.message || "Payment initiation failed");
     }
   } catch (error) {
-    console.error("❌ [PhonePe] Error:", error.response?.data || error.message);
-    
+    console.error("💥 PhonePe Payment Error:", {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message
+    });
+
+    // Detailed error handling
     let errorMessage = "Payment initiation failed";
-    if (error.response?.data?.message) {
-      errorMessage = error.response.data.message;
-    } else if (error.response?.data?.code) {
-      errorMessage = `PhonePe Error: ${error.response.data.code}`;
-    }
     
-    res.status(500);
-    throw new Error(errorMessage);
+    if (error.response?.status === 404) {
+      errorMessage = "Invalid API endpoint or Merchant ID. Check configuration.";
+    } else if (error.response?.status === 401) {
+      errorMessage = "Authentication failed. Check credentials.";
+    } else if (error.response?.status === 403) {
+      errorMessage = "Access forbidden. Whitelist your IP.";
+    } else if (error.response?.data?.message) {
+      errorMessage = error.response.data.message;
+    }
+
+    res.status(error.response?.status || 500).json({
+      success: false,
+      message: errorMessage,
+      details: error.response?.data || error.message
+    });
   }
 });
 
 /**
- * ✅ 2. Check Payment Status - PRODUCTION
+ * @desc    Check PhonePe payment status
+ * @route   GET /api/orders/phonepe-status/:merchantTransactionId
+ * @access  Public/Protected
  */
 const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
   const { merchantTransactionId } = req.params;
 
-  console.log("🔄 [PhonePe] Checking status for:", merchantTransactionId);
-
-  const merchantId = process.env.PHONEPE_MERCHANT_ID;
-  const clientSecret = process.env.PHONEPE_CLIENT_SECRET;
-
-  if (!merchantId || !clientSecret) {
-    res.status(500);
-    throw new Error("PhonePe credentials not configured");
-  }
+  console.log("🔍 Checking Payment Status for:", merchantTransactionId);
 
   try {
-    const endpoint = `/pg/v1/status/${merchantId}/${merchantTransactionId}`;
-    const checksum = generatePhonePeChecksum("", endpoint, clientSecret, "1");
+    const accessToken = await getPhonePeAuthToken();
 
-    // PRODUCTION URL
-    const statusUrl = `https://api.phonepe.com/apis/hermes${endpoint}`;
+    const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${process.env.PHONEPE_MERCHANT_ID}/${merchantTransactionId}`;
 
-    console.log("📍 [PhonePe] Status URL:", statusUrl);
-
-    const response = await axios.get(statusUrl, {
+    const config = {
       headers: {
         "Content-Type": "application/json",
-        "X-VERIFY": checksum,
+        "Authorization": `Bearer ${accessToken}`,
+        "X-MERCHANT-ID": process.env.PHONEPE_MERCHANT_ID,
+        "Accept": "application/json"
       },
-      timeout: 10000,
-    });
+    };
 
-    console.log("✅ [PhonePe] Status Response:", JSON.stringify(response.data, null, 2));
+    const agent = getProxyAgent();
+    if (agent) config.httpsAgent = agent;
 
+    const response = await axios.get(statusUrl, config);
+
+    console.log("📊 Status Response:", JSON.stringify(response.data, null, 2));
+
+    // Update order if payment successful
     if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
-      // Extract order ID from merchant transaction ID
-      const orderIdMatch = merchantTransactionId.match(/TXN_([^_]+)_/);
-      const orderId = orderIdMatch ? orderIdMatch[1] : null;
+      const orderId = merchantTransactionId.split('_')[1]; // Extract order ID from TXN_orderId_timestamp
+      const order = await Order.findById(orderId);
 
-      if (orderId) {
-        const order = await Order.findById(orderId);
+      if (order && !order.isPaid) {
+        await updateOrderAfterPayment(order, {
+          id: response.data.data.transactionId,
+          method: "PhonePe",
+        });
 
-        if (order && !order.isPaid) {
-          await updateOrderAfterPayment(order, {
-            id: response.data.data.transactionId,
-            method: "PhonePe",
-            paymentId: merchantTransactionId,
-          });
-          console.log(`✅ [PhonePe] Order ${orderId} marked as paid`);
-
-          return res.json({
-            success: true,
-            message: "Payment Successful",
-            code: response.data.code,
-            order,
-          });
-        }
+        return res.json({
+          success: true,
+          message: "Payment verified successfully",
+          order: order
+        });
       }
     }
 
-    res.json({
-      success: response.data.success,
-      code: response.data.code,
-      message: response.data.message,
-      data: response.data.data,
-    });
+    res.json(response.data);
   } catch (error) {
-    console.error("❌ [PhonePe] Status error:", error.response?.data || error.message);
-    res.status(500).json({
+    console.error("❌ Status Check Failed:", error.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
       success: false,
       message: "Status check failed",
-      error: error.response?.data || error.message,
+      details: error.response?.data || error.message
     });
   }
 });
 
 /**
- * ✅ 3. Handle PhonePe Webhook - PRODUCTION
+ * @desc    Handle PhonePe webhook
+ * @route   POST /api/orders/phonepe-webhook
+ * @access  Public (Called by PhonePe)
  */
 const handlePhonePeWebhook = asyncHandler(async (req, res) => {
-  console.log("🔔 [PhonePe] Webhook received");
-  console.log("📨 [PhonePe] Request body:", JSON.stringify(req.body, null, 2));
+  console.log("🔔 PhonePe Webhook Received:", req.body);
 
   try {
     if (req.body.response) {
-      // Decode base64 response
-      const decodedBuffer = Buffer.from(req.body.response, "base64");
-      const decodedBody = JSON.parse(decodedBuffer.toString("utf8"));
+      const decodedData = JSON.parse(
+        Buffer.from(req.body.response, "base64").toString("utf8")
+      );
 
-      console.log("📨 [PhonePe] Decoded webhook:", JSON.stringify(decodedBody, null, 2));
+      console.log("📦 Decoded Webhook Data:", decodedData);
 
-      if (decodedBody.code === "PAYMENT_SUCCESS") {
-        const merchantTxnId = decodedBody.data.merchantTransactionId;
+      if (decodedData.code === "PAYMENT_SUCCESS") {
+        const merchantTransactionId = decodedData.data.merchantTransactionId;
+        const orderId = merchantTransactionId.split('_')[1];
 
-        // Extract order ID from transaction ID
-        const orderIdMatch = merchantTxnId.match(/TXN_([^_]+)_/);
-        const orderId = orderIdMatch ? orderIdMatch[1] : null;
-
-        if (orderId) {
-          const order = await Order.findById(orderId);
-
-          if (order && !order.isPaid) {
-            await updateOrderAfterPayment(order, {
-              id: decodedBody.data.transactionId,
-              method: "PhonePe Webhook",
-              paymentId: merchantTxnId,
-            });
-            console.log(`✅ [PhonePe] Order ${orderId} updated via webhook`);
-          } else if (order && order.isPaid) {
-            console.log(`ℹ️ [PhonePe] Order ${orderId} already marked as paid`);
-          } else {
-            console.error(`❌ [PhonePe] Order ${orderId} not found`);
-          }
+        const order = await Order.findById(orderId);
+        if (order && !order.isPaid) {
+          await updateOrderAfterPayment(order, {
+            id: decodedData.data.transactionId,
+            method: "PhonePe Webhook",
+          });
+          console.log("✅ Order marked as paid via webhook");
         }
-      } else {
-        console.log(`⚠️ [PhonePe] Payment status: ${decodedBody.code}`);
       }
     }
-  } catch (err) {
-    console.error("❌ [PhonePe] Webhook processing error:", err);
+  } catch (error) {
+    console.error("❌ Webhook Processing Error:", error);
   }
 
-  // Always return 200 to acknowledge webhook
+  // Always return 200 to PhonePe
   res.status(200).send("OK");
 });
 
-// --- ADMIN CONTROLLERS ---
+// ============================================
+// ADMIN CONTROLLERS
+// ============================================
 
+/**
+ * @desc    Get all orders (Admin)
+ * @route   GET /api/orders/all
+ * @access  Private/Admin
+ */
 const getAllOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({})
     .populate("user", "id name email")
@@ -515,6 +598,11 @@ const getAllOrders = asyncHandler(async (req, res) => {
   res.json(ordersWithFiles);
 });
 
+/**
+ * @desc    Mark order as paid by admin
+ * @route   PUT /api/orders/:id/mark-as-paid
+ * @access  Private/Admin
+ */
 const updateOrderToPaidByAdmin = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (order) {
@@ -530,6 +618,11 @@ const updateOrderToPaidByAdmin = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * @desc    Delete order (Admin)
+ * @route   DELETE /api/orders/:id
+ * @access  Private/Admin
+ */
 const deleteOrder = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (order) {
@@ -540,6 +633,10 @@ const deleteOrder = asyncHandler(async (req, res) => {
     throw new Error("Order not found");
   }
 });
+
+// ============================================
+// EXPORTS
+// ============================================
 
 module.exports = {
   addOrderItems,
