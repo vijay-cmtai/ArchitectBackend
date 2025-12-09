@@ -6,7 +6,7 @@ const Order = require("../models/orderModel.js");
 const Product = require("../models/productModel.js");
 const ProfessionalPlan = require("../models/professionalPlanModel.js");
 
-// Helper: Trim environment variables
+// Helper to clean env variables
 const getEnv = (key) => (process.env[key] ? process.env[key].trim() : "");
 
 const getDownloadableFilesForOrder = async (orderItems) => {
@@ -62,7 +62,6 @@ const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
 // PHONEPE V2 OAUTH TOKEN GENERATION
 // ==========================================
 const getPhonePeAuthToken = async () => {
-  // Production URL for OAuth
   const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
 
   const params = new URLSearchParams();
@@ -78,15 +77,20 @@ const getPhonePeAuthToken = async () => {
   };
 
   try {
+    console.log("🔐 Requesting PhonePe Token...");
     const response = await axios.post(tokenUrl, params.toString(), config);
+    
     if(response.data && response.data.access_token) {
+        console.log("✅ Token Received");
         return response.data.access_token;
     } else {
-        throw new Error("No token returned from PhonePe");
+        throw new Error("No access token in PhonePe response");
     }
   } catch (error) {
-    console.error("Token Generation Failed:", error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || "PhonePe Auth Token Failed");
+    console.error("❌ Token Error:", error.response?.data || error.message);
+    // Throw detailed error so createPhonePePayment catches it
+    const errorMsg = error.response?.data?.error_description || error.response?.data?.message || "OAuth Token Generation Failed";
+    throw new Error(errorMsg);
   }
 };
 
@@ -191,7 +195,7 @@ const getOrderByIdForGuest = asyncHandler(async (req, res) => {
 });
 
 // ==========================================
-// OTHER GATEWAYS (Razorpay, Paypal)
+// OTHER PAYMENT GATEWAYS
 // ==========================================
 
 const razorpay = new Razorpay({
@@ -267,7 +271,7 @@ const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
 });
 
 // ==========================================
-// PHONEPE V2 PAYMENT (OAUTH)
+// PHONEPE V2 PAYMENT (OAUTH) - FIXED
 // ==========================================
 
 const createPhonePePayment = asyncHandler(async (req, res) => {
@@ -277,16 +281,22 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
   }
 
   try {
-    // 1. Get OAuth Token
+    // 1. Get OAuth Token (Will throw specific error if fails)
     const accessToken = await getPhonePeAuthToken();
 
-    // 2. Prepare Payload
+    // 2. Prepare Data
     const merchantId = getEnv("PHONEPE_MERCHANT_ID");
-    const merchantTransactionId = `TXN${Date.now()}`; // Ensure unique
+    const merchantTransactionId = `TXN${Date.now()}`;
     const amount = Math.round(order.totalPrice * 100);
 
-    let phoneNumber = order.shippingAddress?.phone || "9999999999";
-    phoneNumber = phoneNumber.replace(/\D/g, "").slice(-10);
+    // FIX: Safer Phone Number Logic
+    let phoneNumber = "9999999999";
+    if (order.shippingAddress && order.shippingAddress.phone) {
+      const cleanPhone = order.shippingAddress.phone.replace(/\D/g, "");
+      if (cleanPhone.length >= 10) {
+        phoneNumber = cleanPhone.slice(-10);
+      }
+    }
 
     const payloadData = {
       merchantId: merchantId,
@@ -302,9 +312,11 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       }
     };
 
+    console.log("📦 Payload:", JSON.stringify(payloadData, null, 2));
+
     const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
     
-    // 3. API Call (V2 uses Bearer Token, not X-VERIFY for pay request usually)
+    // 3. Send Request
     const payUrl = `https://api.phonepe.com/apis/hermes/pg/v1/pay`;
 
     const config = {
@@ -316,11 +328,14 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
       },
     };
 
+    console.log("🚀 Sending Payment Request...");
     const response = await axios.post(
       payUrl,
       { request: base64Payload },
       config
     );
+
+    console.log("📥 PhonePe Success:", response.data);
 
     if (response.data.success) {
       order.paymentResult = {
@@ -341,13 +356,21 @@ const createPhonePePayment = asyncHandler(async (req, res) => {
     }
 
   } catch (error) {
-    console.error("PhonePe V2 Error:", error.response?.data);
-    
-    // Return detailed error to help debugging
-    res.status(error.response?.status || 500).json({
+    // EXPOSE THE REAL ERROR
+    const status = error.response?.status || 500;
+    const errorData = error.response?.data;
+    const errorMessage = errorData?.message || error.message || "PhonePe Unknown Error";
+
+    console.error("💥 PhonePe Critical Error:", {
+      status,
+      message: errorMessage,
+      details: errorData
+    });
+
+    res.status(status).json({
       success: false,
-      message: error.response?.data?.message || "PhonePe Payment Failed (V2)",
-      details: error.response?.data
+      message: errorMessage, // This will now show the REAL error (e.g. "Api Mapping Not Found" or "IP not whitelisted")
+      details: errorData
     });
   }
 });
