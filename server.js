@@ -27,16 +27,31 @@ const sellerinquiryRoutes = require("./routes/sellerinquiryRoutes.js");
 const mediaRoutes = require("./routes/mediaRoutes.js");
 const shareRoutes = require("./routes/shareRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
-const sellerDashboardRoutes = require("./routes/sellerDashboardRoutes.js");
+
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// ✅ CORS FIXED — only this part changed
+// ====== 🔥 LOGGING MIDDLEWARE (added only this) ======
+app.use((req, res, next) => {
+  const hostUrl = req.protocol + "://" + req.get("host");
+
+  console.log("===== NEW REQUEST RECEIVED =====");
+  console.log("Host URL:", hostUrl);
+  console.log("Full URL:", hostUrl + req.originalUrl);
+  console.log("Headers:", req.headers);
+  console.log("Request Payload:", req.body);
+  console.log("==================================");
+
+  next();
+});
+// ======================================================
+
+// CORS FIX
 app.use(
   cors({
-    origin: ["https://www.houseplanfiles.com", "http://localhost:3000"],
+    origin: ["https://www.houseplanfiles.com", "http://localhost:8080"],
     credentials: true,
   })
 );
@@ -71,8 +86,6 @@ app.use("/api/sellerinquiries", sellerinquiryRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/share", shareRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/seller-dashboard", sellerDashboardRoutes);
-
 
 app.use(notFound);
 app.use(errorHandler);
