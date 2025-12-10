@@ -211,29 +211,66 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 });
 
-const getAllUsers = asyncHandler(async (req, res) => {
-  const { role, status, page = 1, limit = 10 } = req.query;
-  let filter = { role: { $ne: "admin" } };
-  if (role && role !== "all") filter.role = role;
-  if (status && status !== "all") filter.status = status;
-  const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-  const users = await User.find(filter)
-    .select("-password")
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(parseInt(limit, 10));
-  const totalUsers = await User.countDocuments(filter);
-  res.json({
-    users,
-    pagination: {
-      currentPage: parseInt(page, 10),
-      totalPages: Math.ceil(totalUsers / parseInt(limit, 10)),
-      totalUsers,
-      hasNextPage: skip + users.length < totalUsers,
-      hasPrevPage: parseInt(page, 10) > 1,
-    },
-  });
-});
+const getAllUsers = async (req, res) => {
+  try {
+    // 1. Query Params receive karein
+    const { page = 1, limit = 10, search, role, status, city } = req.query;
+
+    // 2. Query Object banayein
+    const query = {};
+
+    // --- SEARCH LOGIC ---
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } }, // Name match
+        { email: { $regex: search, $options: "i" } }, // Email match
+        { businessName: { $regex: search, $options: "i" } }, // Business Name match
+        { companyName: { $regex: search, $options: "i" } }, // Company Name match
+      ];
+    }
+
+    // --- FILTERS ---
+    if (role && role !== "all") {
+      query.role = role;
+    }
+
+    if (status && status !== "all") {
+      query.status = status;
+    }
+
+    // --- CITY FILTER (Case Insensitive) ---
+    if (city) {
+      query.city = { $regex: city, $options: "i" };
+    }
+
+    // 3. Pagination Logic
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // 4. Database Fetch
+    const users = await User.find(query)
+      .sort({ createdAt: -1 }) // Latest first
+      .skip(skip)
+      .limit(limitNumber);
+
+    const totalUsers = await User.countDocuments(query);
+
+    res.json({
+      users,
+      pagination: {
+        totalUsers,
+        totalPages: Math.ceil(totalUsers / limitNumber),
+        currentPage: pageNumber,
+        hasPrevPage: pageNumber > 1,
+        hasNextPage: pageNumber < Math.ceil(totalUsers / limitNumber),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+};
+
 
 const getUserById = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -410,11 +447,15 @@ const getSellerPublicProfile = asyncHandler(async (req, res) => {
   }
 });
 
+// userController.js ke andar is function ko replace karein
+
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email });
 
   if (!user) {
+    // We send a generic success message even if the user doesn't exist
+    // to prevent people from checking which emails are registered.
     return res.json({
       message: "Password reset link has been sent to your email.",
     });
@@ -427,7 +468,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     .update(resetToken)
     .digest("hex");
 
-  user.passwordResetExpires = Date.now() + 10 * 60 * 1000;
+  user.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
   await user.save({ validateBeforeSave: false });
 
@@ -441,6 +482,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
       <p>If you did not request this, please ignore this email.</p>
     `;
 
+    // sendEmail function in mailer.js is called here
     await sendEmail({
       to: user.email,
       subject: "ArchHome - Password Reset Request",
@@ -449,6 +491,8 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
     res.json({ message: "Password reset link has been sent to your email." });
   } catch (error) {
+    console.error("DETAILED NODEMAILER ERROR:", error);
+
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     await user.save({ validateBeforeSave: false });
@@ -457,7 +501,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
     throw new Error("Email could not be sent. Please try again later.");
   }
 });
-
 const resetPassword = asyncHandler(async (req, res) => {
   const { password } = req.body;
   const { token } = req.params;
