@@ -1,457 +1,629 @@
 const asyncHandler = require("express-async-handler");
-const Razorpay = require("razorpay");
+const User = require("../models/userModel.js");
+const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const axios = require("axios");
-const Order = require("../models/orderModel.js");
-const Product = require("../models/productModel.js");
-const ProfessionalPlan = require("../models/professionalPlanModel.js");
+const { sendEmail } = require("../utils/mailer.js");
 
-// Helper to clean env variables
-const getEnv = (key) => (process.env[key] ? process.env[key].trim() : "");
-
-const getDownloadableFilesForOrder = async (orderItems) => {
-  const files = [];
-  for (const item of orderItems) {
-    let product = await Product.findById(item.productId).select(
-      "name planFile Download\\ 1\\ URL"
-    );
-
-    if (!product) {
-      product = await ProfessionalPlan.findById(item.productId).select(
-        "name planFile"
-      );
-    }
-
-    if (product) {
-      const fileUrl =
-        (Array.isArray(product.planFile)
-          ? product.planFile[0]
-          : product.planFile) || product["Download 1 URL"];
-      if (fileUrl) {
-        files.push({
-          productName: product.name || item.name,
-          fileUrl: fileUrl,
-        });
-      }
-    }
-  }
-  return files;
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: "30d",
+  });
 };
 
-const updateOrderAfterPayment = async (order, paymentDetails = {}) => {
-  if (!order || order.isPaid) return order;
-
-  order.isPaid = true;
-  order.paidAt = new Date();
-
-  order.paymentResult = {
-    ...order.paymentResult,
-    status: "COMPLETED",
-    update_time: new Date().toISOString(),
-    ...paymentDetails,
-  };
-
-  order.downloadableFiles = await getDownloadableFilesForOrder(
-    order.orderItems
-  );
-
-  return await order.save();
-};
-
-
-
-const addOrderItems = asyncHandler(async (req, res) => {
+const validateRoleFields = (role, body) => {
   const {
-    orderItems,
-    shippingAddress,
-    paymentMethod,
-    itemsPrice,
-    taxPrice,
-    shippingPrice,
-    totalPrice,
-  } = req.body;
-
-  if (!orderItems || orderItems.length === 0) {
-    res.status(400);
-    throw new Error("No order items");
-  }
-
-  const processedOrderItems = await Promise.all(
-    orderItems.map(async (item) => {
-      let productOwner = null;
-      const profPlan = await ProfessionalPlan.findById(item.productId).select(
-        "user"
-      );
-      if (profPlan) {
-        productOwner = profPlan.user;
-      } else {
-        const adminProduct = await Product.findById(item.productId).select(
-          "user"
+    name,
+    profession,
+    businessName,
+    address,
+    city,
+    materialType,
+    companyName,
+    experience,
+    contractorType,
+  } = body;
+  switch (role) {
+    case "user":
+      if (!name) throw new Error("Full Name is required for Users");
+      return { name, isApproved: true, status: "Approved" };
+    case "professional":
+      if (!name || !profession || !city || !experience)
+        throw new Error(
+          "Full Name, Profession, City, and Experience are required"
         );
-        if (adminProduct && adminProduct.user) {
-          productOwner = adminProduct.user;
-        }
-      }
       return {
-        ...item,
-        productId: item.productId,
-        professional: productOwner,
+        name,
+        profession,
+        city,
+        experience,
+        isApproved: false,
+        status: "Pending",
       };
-    })
-  );
-
-  const order = new Order({
-    user: req.user ? req.user._id : null,
-    orderItems: processedOrderItems,
-    shippingAddress,
-    paymentMethod,
-    itemsPrice,
-    taxPrice,
-    shippingPrice,
-    totalPrice,
-  });
-
-  const createdOrder = await order.save();
-  res.status(201).json(createdOrder);
-});
-
-const getMyOrders = asyncHandler(async (req, res) => {
-  const orders = await Order.find({ user: req.user._id })
-    .populate({
-      path: "orderItems.productId",
-      select:
-        "name planFile mainImage Download\\ 1\\ URL Download\\ 2\\ URL Download\\ 3\\ URL",
-    })
-    .sort({ createdAt: -1 });
-
-  const ordersWithFiles = orders.map((order) => {
-    const orderObj = order.toObject();
-    orderObj.orderItems = orderObj.orderItems.map((item) => {
-      if (item.productId) {
-        return {
-          ...item,
-          planFile:
-            item.productId.planFile ||
-            (item.productId["Download 1 URL"]
-              ? [item.productId["Download 1 URL"]]
-              : []),
-          image: item.image || item.productId.mainImage,
-        };
-      }
-      return item;
-    });
-    return orderObj;
-  });
-
-  res.json(ordersWithFiles);
-});
-
-const getOrderByIdForGuest = asyncHandler(async (req, res) => {
-  const order = await Order.findOne({ orderId: req.params.orderId }).populate(
-    "orderItems.productId",
-    "name"
-  );
-
-  if (order) {
-    res.json(order);
-  } else {
-    res.status(404);
-    throw new Error("Order not found");
-  }
-});
-
-// ==========================================
-// OTHER PAYMENT GATEWAYS
-// ==========================================
-
-const razorpay = new Razorpay({
-  key_id: getEnv("RAZORPAY_KEY_ID"),
-  key_secret: getEnv("RAZORPAY_KEY_SECRET"),
-});
-
-const createRazorpayOrder = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (!order) {
-    res.status(404);
-    throw new Error("Order not found");
-  }
-  const options = {
-    amount: Math.round(order.totalPrice * 100),
-    currency: "INR",
-    receipt: order._id.toString(),
-  };
-  try {
-    const razorpayOrder = await razorpay.orders.create(options);
-    res.json({
-      orderId: razorpayOrder.id,
-      currency: razorpayOrder.currency,
-      amount: razorpayOrder.amount,
-    });
-  } catch (error) {
-    res.status(500);
-    throw new Error("Could not create Razorpay order");
-  }
-});
-
-const verifyPaymentAndUpdateOrder = asyncHandler(async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-    req.body;
-  const order = await Order.findById(req.params.id);
-  if (!order) {
-    res.status(404);
-    throw new Error("Order not found");
-  }
-  const body = razorpay_order_id + "|" + razorpay_payment_id;
-  const expectedSignature = crypto
-    .createHmac("sha256", getEnv("RAZORPAY_KEY_SECRET"))
-    .update(body.toString())
-    .digest("hex");
-  if (expectedSignature === razorpay_signature) {
-    const updatedOrder = await updateOrderAfterPayment(order, {
-      id: razorpay_payment_id,
-      email_address: order.shippingAddress.email,
-    });
-    res.json(updatedOrder);
-  } else {
-    res.status(400);
-    throw new Error("Payment verification failed");
-  }
-});
-
-const getPaypalClientId = asyncHandler(async (req, res) => {
-  res.json({ clientId: getEnv("PAYPAL_CLIENT_ID") });
-});
-
-const updateOrderToPaidWithPaypal = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (order) {
-    const updatedOrder = await updateOrderAfterPayment(order, {
-      id: req.body.id,
-      status: req.body.status,
-      email_address: req.body.payer.email_address,
-    });
-    res.json(updatedOrder);
-  } else {
-    res.status(404);
-    throw new Error("Order not found");
-  }
-});
-
-// ==========================================
-// PHONEPE V2 PAYMENT (OAUTH) - FIXED
-// ==========================================
-// PHONEPE V2 OAUTH TOKEN
-const getPhonePeAuthToken = async () => {
-  const tokenUrl = "https://api.phonepe.com/apis/hermes/v1/oauth/token";
-
-  const params = new URLSearchParams();
-  params.append("grant_type", "client_credentials");
-  params.append("client_id", getEnv("PHONEPE_CLIENT_ID"));
-  params.append("client_secret", getEnv("PHONEPE_CLIENT_SECRET"));
-
-  const config = {
-    headers: { 
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json"
-    },
-  };
-
-  try {
-    const response = await axios.post(tokenUrl, params.toString(), config);
-    if(response.data && response.data.access_token) {
-        return response.data.access_token;
-    } else {
-        throw new Error("No access token in PhonePe response");
-    }
-  } catch (error) {
-    const errorMsg = error.response?.data?.error_description || error.response?.data?.message || "OAuth Token Generation Failed";
-    throw new Error(errorMsg);
+    case "seller":
+      if (!businessName || !address || !city || !materialType)
+        throw new Error(
+          "Business Name, Address, City, and Material Type are required"
+        );
+      return {
+        businessName,
+        address,
+        city,
+        materialType,
+        isApproved: false,
+        status: "Pending",
+      };
+    case "Contractor":
+      if (
+        !name ||
+        !companyName ||
+        !address ||
+        !city ||
+        !experience ||
+        !profession
+      )
+        throw new Error(
+          "Full Name, Company Name, Address, City, Experience, and Profession are required"
+        );
+      return {
+        name,
+        companyName,
+        address,
+        city,
+        experience,
+        profession,
+        contractorType: contractorType || "Normal",
+        isApproved: false,
+        status: "Pending",
+      };
+    case "admin":
+      if (!name) throw new Error("Full Name is required for Admin");
+      return { name, isApproved: true, status: "Approved" };
+    default:
+      throw new Error("Invalid role specified");
   }
 };
 
-// CREATE PHONEPE PAYMENT
-const createPhonePePayment = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (!order) return res.status(404).json({ message: "Order not found" });
+const getUserDisplayName = (user) => {
+  return user.name || user.businessName || user.companyName;
+};
 
+const registerUser = asyncHandler(async (req, res) => {
+  const { email, password, phone, role } = req.body;
+  if (!email || !password || !phone || !role) {
+    res.status(400);
+    throw new Error(
+      "Please provide all required fields: email, password, phone, and role"
+    );
+  }
+  const userExists = await User.findOne({ email });
+  if (userExists) {
+    res.status(400);
+    throw new Error("User with this email already exists");
+  }
+  let userData = { email, password, phone, role };
   try {
-    const accessToken = await getPhonePeAuthToken();
-    const merchantId = getEnv("PHONEPE_MERCHANT_ID");
-    const merchantTransactionId = `TXN${Date.now()}`;
-    const amount = Math.round(order.totalPrice * 100);
+    const roleSpecificData = validateRoleFields(role, req.body);
+    userData = { ...userData, ...roleSpecificData };
 
-    let phoneNumber = "9999999999";
-    if (order.shippingAddress?.phone) {
-      const cleanPhone = order.shippingAddress.phone.replace(/\D/g, "");
-      if (cleanPhone.length >= 10) phoneNumber = cleanPhone.slice(-10);
+    if (req.files) {
+      if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
+      if (req.files.businessCertification)
+        userData.businessCertificationUrl =
+          req.files.businessCertification[0].location;
+      if (req.files.shopImage)
+        userData.shopImageUrl = req.files.shopImage[0].location;
     }
 
-    const payloadData = {
-      merchantId,
-      merchantTransactionId,
-      merchantUserId: order.user ? order.user.toString() : `GUEST${Date.now()}`,
-      amount,
-      redirectUrl: `${getEnv("FRONTEND_URL")}/order/${order._id}`,
-      redirectMode: "REDIRECT",
-      callbackUrl: `${getEnv("BACKEND_URL")}/api/orders/phonepe-webhook`,
-      mobileNumber: phoneNumber,
-      paymentInstrument: { type: "PAY_PAGE" },
-    };
+    const user = await User.create(userData);
+    res.status(201).json({
+      _id: user._id,
+      email: user.email,
+      role: user.role,
+      name: getUserDisplayName(user),
+      isApproved: user.isApproved,
+      status: user.status,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    res.status(400);
+    throw error;
+  }
+});
 
-    const base64Payload = Buffer.from(JSON.stringify(payloadData)).toString("base64");
-    const payUrl = `https://api.phonepe.com/apis/hermes/pg/v1/pay`;
-    const config = {
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`,
-        "X-MERCHANT-ID": merchantId,
+const createUserByAdmin = asyncHandler(async (req, res) => {
+  const { email, password, phone, role } = req.body;
+  if (!email || !password || !phone || !role) {
+    res.status(400);
+    throw new Error("Email, password, phone, and role are required.");
+  }
+  const userExists = await User.findOne({ email });
+  if (userExists) {
+    res.status(400);
+    throw new Error("User with this email already exists");
+  }
+  let userData = { email, password, phone, role };
+  try {
+    const roleSpecificData = validateRoleFields(role, req.body);
+    userData = { ...userData, ...roleSpecificData };
+    userData.isApproved = true;
+    userData.status = "Approved";
+
+    if (req.files) {
+      if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
+      if (req.files.businessCertification)
+        userData.businessCertificationUrl =
+          req.files.businessCertification[0].location;
+      if (req.files.shopImage)
+        userData.shopImageUrl = req.files.shopImage[0].location;
+    }
+
+    const user = await User.create(userData);
+    res.status(201).json({
+      _id: user._id,
+      email: user.email,
+      role: user.role,
+      name: getUserDisplayName(user),
+    });
+  } catch (error) {
+    res.status(400);
+    throw error;
+  }
+});
+
+const loginUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    res.status(400);
+    throw new Error("Please provide email and password");
+  }
+  const user = await User.findOne({ email });
+
+  if (user && (await user.matchPassword(password))) {
+    if (
+      ["professional", "seller", "Contractor"].includes(user.role) &&
+      !user.isApproved
+    ) {
+      res.status(403);
+      throw new Error(
+        `Your account is currently in "${user.status}" state. Please wait for admin approval.`
+      );
+    }
+
+    res.json({
+      _id: user._id,
+      email: user.email,
+      role: user.role,
+      name: getUserDisplayName(user),
+      isApproved: user.isApproved,
+      status: user.status,
+      profession: user.profession,
+      businessName: user.businessName,
+      companyName: user.companyName,
+      experience: user.experience,
+      city: user.city,
+      photoUrl: user.photoUrl,
+      contractorType: user.contractorType,
+      token: generateToken(user._id),
+    });
+  } else {
+    res.status(401);
+    throw new Error("Invalid email or password");
+  }
+});
+
+const getAllUsers = async (req, res) => {
+  try {
+    // 1. Query Params receive karein
+    const { page = 1, limit = 10, search, role, status, city } = req.query;
+
+    // 2. Query Object banayein
+    const query = {};
+
+    // --- SEARCH LOGIC ---
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } }, // Name match
+        { email: { $regex: search, $options: "i" } }, // Email match
+        { businessName: { $regex: search, $options: "i" } }, // Business Name match
+        { companyName: { $regex: search, $options: "i" } }, // Company Name match
+      ];
+    }
+
+    // --- FILTERS ---
+    if (role && role !== "all") {
+      query.role = role;
+    }
+
+    if (status && status !== "all") {
+      query.status = status;
+    }
+
+    // --- CITY FILTER (Case Insensitive) ---
+    if (city) {
+      query.city = { $regex: city, $options: "i" };
+    }
+
+    // 3. Pagination Logic
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // 4. Database Fetch
+    const users = await User.find(query)
+      .sort({ createdAt: -1 }) // Latest first
+      .skip(skip)
+      .limit(limitNumber);
+
+    const totalUsers = await User.countDocuments(query);
+
+    res.json({
+      users,
+      pagination: {
+        totalUsers,
+        totalPages: Math.ceil(totalUsers / limitNumber),
+        currentPage: pageNumber,
+        hasPrevPage: pageNumber > 1,
+        hasNextPage: pageNumber < Math.ceil(totalUsers / limitNumber),
       },
-    };
-
-    const response = await axios.post(payUrl, { request: base64Payload }, config);
-
-    if (response.data.success) {
-      order.paymentResult = { ...order.paymentResult, id: merchantTransactionId, status: "PENDING" };
-      await order.save();
-
-      return res.json({
-        success: true,
-        redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
-        merchantTransactionId,
-      });
-    } else {
-      throw new Error(response.data.message || "Payment initiation failed");
-    }
-
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      success: false,
-      message: error.response?.data?.message || error.message,
-      details: error.response?.data,
     });
+  } catch (error) {
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+};
+
+const getUserById = asyncHandler(async (req, res) => {
+  if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+    res.status(400);
+    throw new Error("Invalid user ID format");
+  }
+  const user = await User.findById(req.params.id).select("-password");
+  if (user) {
+    res.json(user);
+  } else {
+    res.status(404);
+    throw new Error("User not found");
   }
 });
 
-// CHECK PHONEPE PAYMENT STATUS
-const checkPhonePePaymentStatus = asyncHandler(async (req, res) => {
-  const { merchantTransactionId } = req.params;
+const updateUser = asyncHandler(async (req, res) => {
+  if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+    res.status(400);
+    throw new Error("Invalid user ID format");
+  }
+  const user = await User.findById(req.params.id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  if (
+    req.user.role !== "admin" &&
+    user._id.toString() !== req.user._id.toString()
+  ) {
+    res.status(403);
+    throw new Error("Not authorized to update this user's profile.");
+  }
+
+  user.email = req.body.email || user.email;
+  user.phone = req.body.phone || user.phone;
+
+  if (req.body.password) {
+    if (req.body.password.length < 6) {
+      res.status(400);
+      throw new Error("Password must be at least 6 characters long");
+    }
+    user.password = req.body.password;
+  }
+
+  if (req.files) {
+    if (req.files.photo) user.photoUrl = req.files.photo[0].location;
+    if (req.files.shopImage)
+      user.shopImageUrl = req.files.shopImage[0].location;
+    if (req.files.businessCertification)
+      user.businessCertificationUrl =
+        req.files.businessCertification[0].location;
+  }
+
+  switch (user.role) {
+    case "user":
+    case "admin":
+      user.name = req.body.name || user.name;
+      break;
+    case "professional":
+      user.name = req.body.name || user.name;
+      user.profession = req.body.profession || user.profession;
+      user.city = req.body.city || user.city;
+      user.experience = req.body.experience || user.experience;
+      break;
+    case "seller":
+      user.businessName = req.body.businessName || user.businessName;
+      user.address = req.body.address || user.address;
+      user.city = req.body.city || user.city;
+      user.materialType = req.body.materialType || user.materialType;
+      break;
+    case "Contractor":
+      user.name = req.body.name || user.name;
+      user.companyName = req.body.companyName || user.companyName;
+      user.address = req.body.address || user.address;
+      user.city = req.body.city || user.city;
+      user.experience = req.body.experience || user.experience;
+      user.profession = req.body.profession || user.profession;
+      if (req.body.contractorType) {
+        user.contractorType = req.body.contractorType;
+      }
+      break;
+  }
+
+  if (req.user.role === "admin") {
+    if (req.body.status) {
+      user.status = req.body.status;
+      user.isApproved = req.body.status === "Approved";
+    }
+    if (req.body.isApproved !== undefined) {
+      user.isApproved = req.body.isApproved;
+      user.status = req.body.isApproved ? "Approved" : "Pending";
+    }
+  }
+
+  const updatedUser = await user.save();
+
+  res.json({
+    _id: updatedUser._id,
+    name: getUserDisplayName(updatedUser),
+    email: updatedUser.email,
+    phone: updatedUser.phone,
+    role: updatedUser.role,
+    isApproved: updatedUser.isApproved,
+    status: updatedUser.status,
+    businessName: updatedUser.businessName,
+    companyName: updatedUser.companyName,
+    profession: updatedUser.profession,
+    experience: updatedUser.experience,
+    address: updatedUser.address,
+    city: updatedUser.city,
+    materialType: updatedUser.materialType,
+    photoUrl: updatedUser.photoUrl,
+    shopImageUrl: updatedUser.shopImageUrl,
+    businessCertificationUrl: updatedUser.businessCertificationUrl,
+    contractorType: updatedUser.contractorType,
+    token: generateToken(updatedUser._id),
+  });
+});
+
+const deleteUser = asyncHandler(async (req, res) => {
+  if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+    res.status(400);
+    throw new Error("Invalid user ID format");
+  }
+  const user = await User.findById(req.params.id);
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+  if (user.role === "admin") {
+    res.status(400);
+    throw new Error("Cannot delete an admin user");
+  }
+  await User.findByIdAndDelete(req.params.id);
+  res.json({
+    message: "User removed successfully",
+    deletedUser: {
+      _id: user._id,
+      name: getUserDisplayName(user),
+      email: user.email,
+      role: user.role,
+    },
+  });
+});
+
+const getUserStats = asyncHandler(async (req, res) => {
+  const stats = await User.aggregate([
+    { $match: { role: { $ne: "admin" } } },
+    {
+      $group: {
+        _id: "$role",
+        count: { $sum: 1 },
+        approved: { $sum: { $cond: [{ $eq: ["$isApproved", true] }, 1, 0] } },
+        pending: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } },
+      },
+    },
+  ]);
+  const totalUsers = await User.countDocuments({ role: { $ne: "admin" } });
+  res.json({ totalUsers, breakdown: stats });
+});
+
+const getSellerPublicProfile = asyncHandler(async (req, res) => {
+  const seller = await User.findById(req.params.sellerId).select(
+    "name businessName shopImageUrl city"
+  );
+
+  if (seller && seller.role === "seller") {
+    res.json(seller);
+  } else {
+    res.status(404);
+    throw new Error("Seller not found");
+  }
+});
+
+// userController.js ke andar is function ko replace karein
+
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    return res.json({
+      message: "Password reset link has been sent to your email.",
+    });
+  }
+
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  user.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  user.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  await user.save({ validateBeforeSave: false });
 
   try {
-    const accessToken = await getPhonePeAuthToken();
-    const merchantId = getEnv("PHONEPE_MERCHANT_ID");
-    const statusUrl = `https://api.phonepe.com/apis/hermes/pg/v1/status/${merchantId}/${merchantTransactionId}`;
-    const config = { headers: { "Authorization": `Bearer ${accessToken}`, "X-MERCHANT-ID": merchantId } };
+    const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-    const response = await axios.get(statusUrl, config);
+    // Professional HTML Email Template
+    const message = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password Reset Request</title>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: 'Arial', sans-serif; background-color: #f4f4f4;">
+        <table role="presentation" style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td align="center" style="padding: 40px 0;">
+              <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); border-radius: 8px; overflow: hidden;">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: bold;">
+                      🏠 HousePlansFiles
+                    </h1>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 40px 30px;">
+                    <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 24px; font-weight: 600;">
+                      Password Reset Request
+                    </h2>
+                    
+                    <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      Hello <strong>${user.name || "User"}</strong>,
+                    </p>
+                    
+                    <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      We received a request to reset your password for your HousePlansFiles account. Click the button below to create a new password:
+                    </p>
+                    
+                    <!-- Button -->
+                    <table role="presentation" style="margin: 30px 0;">
+                      <tr>
+                        <td align="center">
+                          <a href="${resetURL}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; border-radius: 6px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.4);">
+                            Reset Password
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <p style="margin: 20px 0; color: #666666; font-size: 14px; line-height: 1.6;">
+                      Or copy and paste this link into your browser:
+                    </p>
+                    
+                    <p style="margin: 0 0 20px 0; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #667eea; color: #667eea; font-size: 14px; word-break: break-all; border-radius: 4px;">
+                      ${resetURL}
+                    </p>
+                    
+                    <!-- Warning Box -->
+                    <div style="margin: 30px 0; padding: 20px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                      <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
+                        ⚠️ <strong>Important:</strong> This link will expire in <strong>10 minutes</strong> for security reasons.
+                      </p>
+                    </div>
+                    
+                    <p style="margin: 20px 0 0 0; color: #666666; font-size: 14px; line-height: 1.6;">
+                      If you didn't request a password reset, please ignore this email or contact support if you have concerns.
+                    </p>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #e9ecef;">
+                    <p style="margin: 0 0 10px 0; color: #999999; font-size: 14px;">
+                      Best regards,<br>
+                      <strong>The HousePlansFiles Team</strong>
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #999999; font-size: 12px;">
+                      © ${new Date().getFullYear()} HousePlansFiles. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
 
-    if (response.data.success && response.data.code === "PAYMENT_SUCCESS") {
-      const order = await Order.findOne({ "paymentResult.id": merchantTransactionId });
-      if (order && !order.isPaid) {
-        await updateOrderAfterPayment(order, { id: response.data.data.transactionId, method: "PhonePe V2" });
-        return res.json({ success: true, message: "Payment verified successfully", order });
-      }
-    }
-    res.json(response.data);
-
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      success: false,
-      message: "Status check failed",
-      details: error.response?.data,
+    await sendEmail({
+      to: user.email,
+      subject: "🔐 HousePlansFiles - Password Reset Request",
+      html: message,
     });
+
+    res.json({ message: "Password reset link has been sent to your email." });
+  } catch (error) {
+    console.error("DETAILED NODEMAILER ERROR:", error);
+
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.status(500);
+    throw new Error("Email could not be sent. Please try again later.");
   }
 });
+const resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  const { token } = req.params;
 
-// PHONEPE WEBHOOK
-const handlePhonePeWebhook = asyncHandler(async (req, res) => {
-  try {
-    if (req.body.response) {
-      const decodedData = JSON.parse(Buffer.from(req.body.response, "base64").toString("utf8"));
-
-      if (decodedData.code === "PAYMENT_SUCCESS") {
-        const merchantTransactionId = decodedData.data.merchantTransactionId;
-        const order = await Order.findOne({ "paymentResult.id": merchantTransactionId });
-        if (order && !order.isPaid) {
-          await updateOrderAfterPayment(order, { id: decodedData.data.transactionId, method: "PhonePe Webhook" });
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Webhook Error:", error);
+  if (!password || password.length < 6) {
+    res.status(400);
+    throw new Error(
+      "Password is required and must be at least 6 characters long."
+    );
   }
-  res.status(200).send("OK");
-});
 
-const getAllOrders = asyncHandler(async (req, res) => {
-  const orders = await Order.find({})
-    .populate("user", "id name email")
-    .populate({
-      path: "orderItems.productId",
-      select:
-        "name planFile mainImage Download\\ 1\\ URL Download\\ 2\\ URL Download\\ 3\\ URL",
-    })
-    .sort({ createdAt: -1 });
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-  const ordersWithFiles = orders.map((order) => {
-    const orderObj = order.toObject();
-    orderObj.orderItems = orderObj.orderItems.map((item) => {
-      if (item.productId) {
-        return {
-          ...item,
-          planFile:
-            item.productId.planFile ||
-            (item.productId["Download 1 URL"]
-              ? [item.productId["Download 1 URL"]]
-              : []),
-          image: item.image || item.productId.mainImage,
-        };
-      }
-      return item;
-    });
-    return orderObj;
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() },
   });
 
-  res.json(ordersWithFiles);
-});
-
-const updateOrderToPaidByAdmin = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (order) {
-    const updatedOrder = await updateOrderAfterPayment(order, {
-      id: `admin-${req.user._id}-${Date.now()}`,
-      status: "COMPLETED_BY_ADMIN",
-      email_address: order.shippingAddress.email,
-    });
-    res.json(updatedOrder);
-  } else {
-    res.status(404);
-    throw new Error("Order not found");
+  if (!user) {
+    res.status(400);
+    throw new Error("Token is invalid or has expired.");
   }
-});
 
-const deleteOrder = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (order) {
-    await order.deleteOne();
-    res.json({ message: "Order removed successfully" });
-  } else {
-    res.status(404);
-    throw new Error("Order not found");
-  }
+  user.password = password;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+
+  await user.save();
+
+  res.json({ message: "Password has been reset successfully. Please login." });
 });
 
 module.exports = {
-  addOrderItems,
-  getMyOrders,
-  getOrderByIdForGuest,
-  createRazorpayOrder,
-  verifyPaymentAndUpdateOrder,
-  getPaypalClientId,
-  updateOrderToPaidWithPaypal,
-  createPhonePePayment,
-  checkPhonePePaymentStatus,
-  handlePhonePeWebhook,
-  getAllOrders,
-  updateOrderToPaidByAdmin,
-  deleteOrder,
+  registerUser,
+  loginUser,
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
+  getUserStats,
+  createUserByAdmin,
+  getSellerPublicProfile,
+  forgotPassword,
+  resetPassword,
 };
