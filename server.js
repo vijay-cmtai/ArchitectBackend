@@ -4,12 +4,12 @@ const cors = require("cors");
 const path = require("path");
 const connectDB = require("./config/db");
 
+// ROUTES
 const userRoutes = require("./routes/userRoutes");
 const productRoutes = require("./routes/productRoutes");
 const professionalPlanRoutes = require("./routes/professionalPlanRoutes");
 const customizationRequestRoutes = require("./routes/customizationRequestRoutes");
 const standardRequestRoutes = require("./routes/standardRequestRoutes");
-const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const premiumRequestRoutes = require("./routes/premiumRequestRoutes");
 const corporateInquiryRoutes = require("./routes/corporateInquiryRoutes");
 const inquiryRoutes = require("./routes/inquiryRoutes.js");
@@ -28,12 +28,16 @@ const mediaRoutes = require("./routes/mediaRoutes.js");
 const shareRoutes = require("./routes/shareRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 
+const { notFound, errorHandler } = require("./middleware/errorMiddleware");
+
 dotenv.config();
 connectDB();
 
 const app = express();
 
-// ====== 🔥 LOGGING MIDDLEWARE (added only this) ======
+// ======================
+// 🔥 LOGGING MIDDLEWARE
+// ======================
 app.use((req, res, next) => {
   const hostUrl = req.protocol + "://" + req.get("host");
 
@@ -46,20 +50,34 @@ app.use((req, res, next) => {
 
   next();
 });
-// ======================================================
 
-// CORS FIX
-app.use(
-  cors({
-    origin: ["https://www.houseplanfiles.com", "http://localhost:8080"],
-    credentials: true,
-  })
-);
+// =====================
+// ✅ CORS FIX (Vercel)
+// =====================
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "https://www.houseplanfiles.com");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, x-requested-with"
+  );
+  res.header("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 app.use(express.json());
-
 app.use("/uploads", express.static(path.join(__dirname, "/uploads")));
 
+// ==============================
+// ROUTES
+// ==============================
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
@@ -87,9 +105,13 @@ app.use("/api/media", mediaRoutes);
 app.use("/share", shareRoutes);
 app.use("/api/notifications", notificationRoutes);
 
+// ERROR HANDLERS
 app.use(notFound);
 app.use(errorHandler);
 
+// PORT
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+module.exports = app; // for vercel
