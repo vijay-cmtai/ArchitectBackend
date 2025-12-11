@@ -2,7 +2,7 @@
 
 const nodemailer = require("nodemailer");
 
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (options) => {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
@@ -14,10 +14,10 @@ const sendEmail = async (to, subject, html) => {
   });
 
   const mailOptions = {
-    from: `ArchHome <${process.env.SMTP_FROM_EMAIL}>`,
-    to,
-    subject,
-    html,
+    from: `HousePlanFiles <${process.env.SMTP_FROM_EMAIL}>`,
+    to: options.to, 
+    subject: options.subject, 
+    html: options.html, 
   };
 
   await transporter.sendMail(mailOptions);
