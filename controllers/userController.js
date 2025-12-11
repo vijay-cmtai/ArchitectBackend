@@ -271,7 +271,6 @@ const getAllUsers = async (req, res) => {
   }
 };
 
-
 const getUserById = asyncHandler(async (req, res) => {
   if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
     res.status(400);
@@ -454,8 +453,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email });
 
   if (!user) {
-    // We send a generic success message even if the user doesn't exist
-    // to prevent people from checking which emails are registered.
     return res.json({
       message: "Password reset link has been sent to your email.",
     });
@@ -474,18 +471,102 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   try {
     const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+    // Professional HTML Email Template
     const message = `
-      <h1>You have requested a password reset</h1>
-      <p>Please go to this link to reset your password:</p>
-      <a href="${resetURL}" clicktracking=off>${resetURL}</a>
-      <p>This link will expire in 10 minutes.</p>
-      <p>If you did not request this, please ignore this email.</p>
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password Reset Request</title>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: 'Arial', sans-serif; background-color: #f4f4f4;">
+        <table role="presentation" style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td align="center" style="padding: 40px 0;">
+              <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); border-radius: 8px; overflow: hidden;">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: bold;">
+                      🏠 HousePlansFiles
+                    </h1>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 40px 30px;">
+                    <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 24px; font-weight: 600;">
+                      Password Reset Request
+                    </h2>
+                    
+                    <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      Hello <strong>${user.name || "User"}</strong>,
+                    </p>
+                    
+                    <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
+                      We received a request to reset your password for your HousePlansFiles account. Click the button below to create a new password:
+                    </p>
+                    
+                    <!-- Button -->
+                    <table role="presentation" style="margin: 30px 0;">
+                      <tr>
+                        <td align="center">
+                          <a href="${resetURL}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; border-radius: 6px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.4);">
+                            Reset Password
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <p style="margin: 20px 0; color: #666666; font-size: 14px; line-height: 1.6;">
+                      Or copy and paste this link into your browser:
+                    </p>
+                    
+                    <p style="margin: 0 0 20px 0; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #667eea; color: #667eea; font-size: 14px; word-break: break-all; border-radius: 4px;">
+                      ${resetURL}
+                    </p>
+                    
+                    <!-- Warning Box -->
+                    <div style="margin: 30px 0; padding: 20px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                      <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
+                        ⚠️ <strong>Important:</strong> This link will expire in <strong>10 minutes</strong> for security reasons.
+                      </p>
+                    </div>
+                    
+                    <p style="margin: 20px 0 0 0; color: #666666; font-size: 14px; line-height: 1.6;">
+                      If you didn't request a password reset, please ignore this email or contact support if you have concerns.
+                    </p>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #e9ecef;">
+                    <p style="margin: 0 0 10px 0; color: #999999; font-size: 14px;">
+                      Best regards,<br>
+                      <strong>The HousePlansFiles Team</strong>
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #999999; font-size: 12px;">
+                      © ${new Date().getFullYear()} HousePlansFiles. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
     `;
 
-    // sendEmail function in mailer.js is called here
     await sendEmail({
       to: user.email,
-      subject: "ArchHome - Password Reset Request",
+      subject: "🔐 HousePlansFiles - Password Reset Request",
       html: message,
     });
 
