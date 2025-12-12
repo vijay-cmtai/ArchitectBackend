@@ -36,6 +36,7 @@ const userSchema = mongoose.Schema(
     },
 
     // --- NEW: Professional Bank & Payment Details ---
+    bankName: { type: String }, // <--- ADDED: Bank Name Field
     bankAccountNumber: { type: String },
     ifscCode: { type: String },
     upiId: { type: String },
