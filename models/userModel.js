@@ -34,6 +34,13 @@ const userSchema = mongoose.Schema(
       enum: ["Normal", "Premium"],
       default: "Normal",
     },
+
+    // --- NEW: Professional Bank & Payment Details ---
+    bankAccountNumber: { type: String },
+    ifscCode: { type: String },
+    upiId: { type: String },
+    portfolioUrl: { type: String }, // Portfolio PDF URL
+
     passwordResetToken: String,
     passwordResetExpires: Date,
   },
