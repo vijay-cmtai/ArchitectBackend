@@ -120,6 +120,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
     // --- NEW: Add bank details for professionals ---
     if (role === "professional") {
+      userData.bankName = req.body.bankName || null; // <--- ADDED: Bank Name
       userData.bankAccountNumber = req.body.bankAccountNumber || null;
       userData.ifscCode = req.body.ifscCode || null;
       userData.upiId = req.body.upiId || null;
@@ -214,6 +215,11 @@ const loginUser = asyncHandler(async (req, res) => {
       city: user.city,
       photoUrl: user.photoUrl,
       contractorType: user.contractorType,
+      // Bank Details in Login Response
+      bankName: user.bankName, // <--- ADDED
+      bankAccountNumber: user.bankAccountNumber,
+      ifscCode: user.ifscCode,
+      upiId: user.upiId,
       token: generateToken(user._id),
     });
   } else {
@@ -224,23 +230,19 @@ const loginUser = asyncHandler(async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    // 1. Query Params receive karein
     const { page = 1, limit = 10, search, role, status, city } = req.query;
 
-    // 2. Query Object banayein
     const query = {};
 
-    // --- SEARCH LOGIC ---
     if (search) {
       query.$or = [
-        { name: { $regex: search, $options: "i" } }, // Name match
-        { email: { $regex: search, $options: "i" } }, // Email match
-        { businessName: { $regex: search, $options: "i" } }, // Business Name match
-        { companyName: { $regex: search, $options: "i" } }, // Company Name match
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { businessName: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
       ];
     }
 
-    // --- FILTERS ---
     if (role && role !== "all") {
       query.role = role;
     }
@@ -249,19 +251,16 @@ const getAllUsers = async (req, res) => {
       query.status = status;
     }
 
-    // --- CITY FILTER (Case Insensitive) ---
     if (city) {
       query.city = { $regex: city, $options: "i" };
     }
 
-    // 3. Pagination Logic
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
     const skip = (pageNumber - 1) * limitNumber;
 
-    // 4. Database Fetch
     const users = await User.find(query)
-      .sort({ createdAt: -1 }) // Latest first
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNumber);
 
@@ -335,7 +334,6 @@ const updateUser = asyncHandler(async (req, res) => {
     if (req.files.businessCertification)
       user.businessCertificationUrl =
         req.files.businessCertification[0].location;
-    // --- NEW: Portfolio PDF ---
     if (req.files.portfolio)
       user.portfolioUrl = req.files.portfolio[0].location;
   }
@@ -351,6 +349,7 @@ const updateUser = asyncHandler(async (req, res) => {
       user.city = req.body.city || user.city;
       user.experience = req.body.experience || user.experience;
       // --- NEW: Bank details update ---
+      user.bankName = req.body.bankName || user.bankName; // <--- ADDED
       user.bankAccountNumber =
         req.body.bankAccountNumber || user.bankAccountNumber;
       user.ifscCode = req.body.ifscCode || user.ifscCode;
@@ -406,10 +405,11 @@ const updateUser = asyncHandler(async (req, res) => {
     photoUrl: updatedUser.photoUrl,
     shopImageUrl: updatedUser.shopImageUrl,
     businessCertificationUrl: updatedUser.businessCertificationUrl,
-    portfolioUrl: updatedUser.portfolioUrl, // NEW
-    bankAccountNumber: updatedUser.bankAccountNumber, // NEW
-    ifscCode: updatedUser.ifscCode, // NEW
-    upiId: updatedUser.upiId, // NEW
+    portfolioUrl: updatedUser.portfolioUrl,
+    bankName: updatedUser.bankName, // <--- ADDED to Response
+    bankAccountNumber: updatedUser.bankAccountNumber,
+    ifscCode: updatedUser.ifscCode,
+    upiId: updatedUser.upiId,
     contractorType: updatedUser.contractorType,
     token: generateToken(updatedUser._id),
   });
@@ -470,8 +470,6 @@ const getSellerPublicProfile = asyncHandler(async (req, res) => {
   }
 });
 
-// userController.js ke andar is function ko replace karein
-
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email });
@@ -489,14 +487,13 @@ const forgotPassword = asyncHandler(async (req, res) => {
     .update(resetToken)
     .digest("hex");
 
-  user.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  user.passwordResetExpires = Date.now() + 10 * 60 * 1000;
 
   await user.save({ validateBeforeSave: false });
 
   try {
     const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-    // Professional HTML Email Template
     const message = `
       <!DOCTYPE html>
       <html>
@@ -510,8 +507,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
           <tr>
             <td align="center" style="padding: 40px 0;">
               <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); border-radius: 8px; overflow: hidden;">
-                
-                <!-- Header -->
                 <tr>
                   <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
                     <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: bold;">
@@ -519,23 +514,17 @@ const forgotPassword = asyncHandler(async (req, res) => {
                     </h1>
                   </td>
                 </tr>
-                
-                <!-- Content -->
                 <tr>
                   <td style="padding: 40px 30px;">
                     <h2 style="margin: 0 0 20px 0; color: #333333; font-size: 24px; font-weight: 600;">
                       Password Reset Request
                     </h2>
-                    
                     <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
                       Hello <strong>${user.name || "User"}</strong>,
                     </p>
-                    
                     <p style="margin: 0 0 20px 0; color: #666666; font-size: 16px; line-height: 1.6;">
                       We received a request to reset your password for your HousePlansFiles account. Click the button below to create a new password:
                     </p>
-                    
-                    <!-- Button -->
                     <table role="presentation" style="margin: 30px 0;">
                       <tr>
                         <td align="center">
@@ -545,29 +534,22 @@ const forgotPassword = asyncHandler(async (req, res) => {
                         </td>
                       </tr>
                     </table>
-                    
                     <p style="margin: 20px 0; color: #666666; font-size: 14px; line-height: 1.6;">
                       Or copy and paste this link into your browser:
                     </p>
-                    
                     <p style="margin: 0 0 20px 0; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #667eea; color: #667eea; font-size: 14px; word-break: break-all; border-radius: 4px;">
                       ${resetURL}
                     </p>
-                    
-                    <!-- Warning Box -->
                     <div style="margin: 30px 0; padding: 20px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
                       <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
                         ⚠️ <strong>Important:</strong> This link will expire in <strong>10 minutes</strong> for security reasons.
                       </p>
                     </div>
-                    
                     <p style="margin: 20px 0 0 0; color: #666666; font-size: 14px; line-height: 1.6;">
                       If you didn't request a password reset, please ignore this email or contact support if you have concerns.
                     </p>
                   </td>
                 </tr>
-                
-                <!-- Footer -->
                 <tr>
                   <td style="background-color: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #e9ecef;">
                     <p style="margin: 0 0 10px 0; color: #999999; font-size: 14px;">
@@ -579,7 +561,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
                     </p>
                   </td>
                 </tr>
-                
               </table>
             </td>
           </tr>
@@ -606,6 +587,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     throw new Error("Email could not be sent. Please try again later.");
   }
 });
+
 const resetPassword = asyncHandler(async (req, res) => {
   const { password } = req.body;
   const { token } = req.params;
