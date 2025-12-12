@@ -22,6 +22,7 @@ const handleUserUploads = upload.fields([
   { name: "photo", maxCount: 1 },
   { name: "businessCertification", maxCount: 1 },
   { name: "shopImage", maxCount: 1 },
+  { name: "portfolio", maxCount: 1 }, // NEW: Portfolio PDF for professionals
 ]);
 
 router.post("/register", handleUserUploads, registerUser);
