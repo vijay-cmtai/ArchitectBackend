@@ -105,6 +105,7 @@ const registerUser = asyncHandler(async (req, res) => {
     const roleSpecificData = validateRoleFields(role, req.body);
     userData = { ...userData, ...roleSpecificData };
 
+    // Handle file uploads
     if (req.files) {
       if (req.files.photo) userData.photoUrl = req.files.photo[0].location;
       if (req.files.businessCertification)
@@ -112,6 +113,16 @@ const registerUser = asyncHandler(async (req, res) => {
           req.files.businessCertification[0].location;
       if (req.files.shopImage)
         userData.shopImageUrl = req.files.shopImage[0].location;
+      // --- NEW: Portfolio PDF for professionals ---
+      if (req.files.portfolio)
+        userData.portfolioUrl = req.files.portfolio[0].location;
+    }
+
+    // --- NEW: Add bank details for professionals ---
+    if (role === "professional") {
+      userData.bankAccountNumber = req.body.bankAccountNumber || null;
+      userData.ifscCode = req.body.ifscCode || null;
+      userData.upiId = req.body.upiId || null;
     }
 
     const user = await User.create(userData);
@@ -316,6 +327,7 @@ const updateUser = asyncHandler(async (req, res) => {
     user.password = req.body.password;
   }
 
+  // Handle file uploads
   if (req.files) {
     if (req.files.photo) user.photoUrl = req.files.photo[0].location;
     if (req.files.shopImage)
@@ -323,6 +335,9 @@ const updateUser = asyncHandler(async (req, res) => {
     if (req.files.businessCertification)
       user.businessCertificationUrl =
         req.files.businessCertification[0].location;
+    // --- NEW: Portfolio PDF ---
+    if (req.files.portfolio)
+      user.portfolioUrl = req.files.portfolio[0].location;
   }
 
   switch (user.role) {
@@ -335,6 +350,11 @@ const updateUser = asyncHandler(async (req, res) => {
       user.profession = req.body.profession || user.profession;
       user.city = req.body.city || user.city;
       user.experience = req.body.experience || user.experience;
+      // --- NEW: Bank details update ---
+      user.bankAccountNumber =
+        req.body.bankAccountNumber || user.bankAccountNumber;
+      user.ifscCode = req.body.ifscCode || user.ifscCode;
+      user.upiId = req.body.upiId || user.upiId;
       break;
     case "seller":
       user.businessName = req.body.businessName || user.businessName;
@@ -386,6 +406,10 @@ const updateUser = asyncHandler(async (req, res) => {
     photoUrl: updatedUser.photoUrl,
     shopImageUrl: updatedUser.shopImageUrl,
     businessCertificationUrl: updatedUser.businessCertificationUrl,
+    portfolioUrl: updatedUser.portfolioUrl, // NEW
+    bankAccountNumber: updatedUser.bankAccountNumber, // NEW
+    ifscCode: updatedUser.ifscCode, // NEW
+    upiId: updatedUser.upiId, // NEW
     contractorType: updatedUser.contractorType,
     token: generateToken(updatedUser._id),
   });
